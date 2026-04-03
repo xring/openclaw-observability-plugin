@@ -77,18 +77,14 @@ Add to your `~/.openclaw/openclaw.json`:
     },
     "entries": {
       "otel-observability": {
-        "enabled": true,
-        "config": {
-          "endpoint": "http://localhost:4318",
-          "serviceName": "openclaw-gateway",
-          "enableTraces": true,
-          "enableMetrics": true
-        }
+        "enabled": true
       }
     }
   }
 }
 ```
+
+> **Note:** Do NOT add a `config` block inside `otel-observability` — OpenClaw's plugin framework rejects unknown properties. The plugin reads its settings from the `diagnostics.otel` section instead. If you need custom settings, configure them in `diagnostics.otel` (see Option 1 above).
 
 ### Step 4: Clear Cache and Restart
 

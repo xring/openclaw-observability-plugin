@@ -108,11 +108,7 @@ openclaw.request (root span)
        },
        "entries": {
          "otel-observability": {
-           "enabled": true,
-           "config": {
-             "endpoint": "http://localhost:4318",
-             "serviceName": "openclaw-gateway"
-           }
+           "enabled": true
          }
        }
      }
@@ -224,13 +220,18 @@ openclaw.request (root span)
 
 ### Custom Plugin Options
 
+> **Important:** Do NOT add a `config` block inside the plugin entry — OpenClaw's plugin framework rejects unknown properties. The plugin reads its configuration from the `diagnostics.otel` section instead.
+
+The following settings are controlled via the `diagnostics.otel` config block:
+
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `endpoint` | string | — | OTLP endpoint URL |
-| `serviceName` | string | "openclaw-gateway" | Service name |
-| `exporterType` | string | "otlp" | Exporter type |
-| `enableTraces` | boolean | true | Enable traces |
-| `enableMetrics` | boolean | true | Enable metrics |
+| `endpoint` | string | `http://localhost:4318` | OTLP endpoint URL |
+| `serviceName` | string | `openclaw-gateway` | Service name |
+| `protocol` | string | `http/protobuf` | OTLP protocol |
+| `traces` | boolean | true | Enable traces |
+| `metrics` | boolean | true | Enable metrics |
+| `logs` | boolean | true | Enable logs |
 
 ---
 
