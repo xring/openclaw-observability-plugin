@@ -120,6 +120,70 @@ openclaw.session.stuck_age_ms
 
 ## Approach 2: Custom Hook-Based Plugin
 
+### Plugin Lifecycle
+
+OpenClaw drives plugins through three phases. Mixing them up is the single most common way to break the custom plugin — if typed hooks are registered in the wrong phase, the gateway never sees them and no spans are produced. The current layout:
+
+```
+┌──────────────┐      ┌──────────────┐      ┌──────────────┐
+│  register()  │ ───▶ │    start()   │ ───▶ │    stop()    │
+│  synchronous │      │     async    │      │     async    │
+└──────────────┘      └──────────────┘      └──────────────┘
+        │                     │                     │
+        │                     │                     │
+        ▼                     ▼                     ▼
+  - api.on(*)           - initTelemetry()    - stopHooks()
+  - api.registerHook()  - initOpenLLMetry()  - unsubscribe()
+  - api.registerGate…   - registerDiagnost… - telemetry.shutdown()
+  - api.registerCli()
+  - api.registerService()
+  - api.registerTool()
+        │                     │
+        └─── lazy getter ─────┘
+           () => telemetry
+```
+
+| Phase | Runs | Responsibility |
+|---|---|---|
+| `register()` | Synchronous, before the gateway accepts traffic | Wire every typed hook, event-stream hook, RPC method, CLI command, background service, and agent tool. All 15 typed hooks (`message_received`, `before_agent_start`, `tool_result_persist`, `agent_end`, plus the command and gateway event hooks) land here. |
+| `start()` | Async, once the gateway is ready | Build the OTel runtime (`initTelemetry` → TracerProvider + MeterProvider), optionally wrap LLM SDKs with OpenLLMetry when `traces` is on, and subscribe to OpenClaw diagnostic events for cost/token data. |
+| `stop()` | Async, on gateway reload or shutdown | Clear the stale-session sweeper `setInterval` (see [b668a4f](https://github.com/henrikrexed/openclaw-observability-plugin/commit/b668a4f), ISI-522), unsubscribe from diagnostics, and call `telemetry.shutdown()` so batched spans/metrics flush before the process exits. |
+
+### Lazy telemetry getter
+
+Hooks need to be registered in `register()` — which is synchronous and runs before `initTelemetry()` — but they need to read an OTel runtime that only exists after `start()`. The plugin solves this by registering hooks with a **lazy telemetry getter** instead of a concrete runtime:
+
+```typescript
+let telemetry: TelemetryRuntime | null = null;
+
+// Registered in register(), resolves telemetry at call time.
+let stopHooks = registerHooks(api, () => telemetry, config);
+
+api.registerService({
+  id: "otel-observability",
+  start: async () => {
+    telemetry = initTelemetry(config, logger);     // populated here
+    if (config.traces) await initOpenLLMetry(config, logger);
+    unsubscribeDiagnostics = await registerDiagnosticsListener(telemetry, logger);
+  },
+  stop: async () => {
+    stopHooks?.();                                  // clearInterval
+    unsubscribeDiagnostics?.();
+    await telemetry?.shutdown();
+    telemetry = null;
+  },
+});
+```
+
+Each hook handler opens with:
+
+```typescript
+const telemetry = getTelemetry();
+if (!telemetry) return;
+```
+
+so any hook that fires between `register()` and `start()` completing is a clean no-op. Once `initTelemetry()` runs, the next invocation sees a live runtime and begins emitting spans.
+
 ### How It Works
 
 The custom plugin uses **typed plugin hooks** — direct callbacks into the agent lifecycle.
