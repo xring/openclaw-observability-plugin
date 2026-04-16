@@ -27,6 +27,30 @@ import type { TelemetryRuntime } from "./telemetry.js";
 import type { OtelObservabilityConfig } from "./config.js";
 import { activeAgentSpans, getPendingUsage, enrichSpanWithUsage, hasDiagnosticsSupport } from "./diagnostics.js";
 import { checkToolSecurity, checkMessageSecurity, type SecurityCounters } from "./security.js";
+import {
+  GEN_AI_AGENT_ID,
+  GEN_AI_AGENT_NAME,
+  GEN_AI_CONVERSATION_ID,
+  GEN_AI_OPERATION_NAME,
+  GEN_AI_REQUEST_MODEL,
+  GEN_AI_RESPONSE_MODEL,
+  GEN_AI_SYSTEM,
+  GEN_AI_TOKEN_TYPE,
+  GEN_AI_TOOL_CALL_ID,
+  GEN_AI_TOOL_NAME,
+  GEN_AI_USAGE_INPUT_TOKENS,
+  GEN_AI_USAGE_OUTPUT_TOKENS,
+  OP_EXECUTE_TOOL,
+  OP_INVOKE_AGENT,
+  TOKEN_TYPE_INPUT,
+  TOKEN_TYPE_OUTPUT,
+  CODE_FUNCTION,
+  CODE_NAMESPACE,
+  ERROR_TYPE,
+  spanNameExecuteTool,
+} from "./semconv.js";
+
+const CODE_NS = "openclaw.otel.hooks";
 
 /** Active trace context for a session — allows connecting spans into one trace. */
 interface SessionTraceContext {
@@ -88,10 +112,16 @@ export function registerHooks(
         const rootSpan = tracer.startSpan("openclaw.request", {
           kind: SpanKind.SERVER,
           attributes: {
+            // openclaw legacy
             "openclaw.message.channel": channel,
             "openclaw.session.key": sessionKey,
             "openclaw.message.direction": "inbound",
             "openclaw.message.from": from,
+            // GenAI conversation correlation
+            [GEN_AI_CONVERSATION_ID]: sessionKey,
+            // code.*
+            [CODE_FUNCTION]: "message_received",
+            [CODE_NAMESPACE]: CODE_NS,
           },
         });
 
@@ -149,12 +179,24 @@ export function registerHooks(
         const sessionCtx = sessionContextMap.get(sessionKey);
         const parentContext = sessionCtx?.rootContext || context.active();
 
-        // Create agent turn span as child of root span
+        // Create agent turn span as child of root span.
+        // Name is kept as `openclaw.agent.turn` for dashboard backwards-compat;
+        // GenAI stable attributes below make it semconv-compliant.
         const agentSpan = tracer.startSpan(
           "openclaw.agent.turn",
           {
             kind: SpanKind.INTERNAL,
             attributes: {
+              // GenAI stable
+              [GEN_AI_OPERATION_NAME]: OP_INVOKE_AGENT,
+              [GEN_AI_AGENT_ID]: agentId,
+              [GEN_AI_AGENT_NAME]: agentId,
+              [GEN_AI_CONVERSATION_ID]: sessionKey,
+              [GEN_AI_REQUEST_MODEL]: model,
+              // code.*
+              [CODE_FUNCTION]: "before_agent_start",
+              [CODE_NAMESPACE]: CODE_NS,
+              // openclaw legacy (preserve for dashboards)
               "openclaw.agent.id": agentId,
               "openclaw.session.key": sessionKey,
               "openclaw.agent.model": model,
@@ -217,8 +259,11 @@ export function registerHooks(
         // Tool input is available in event.input for security checks
         const toolInput = event?.input || event?.toolInput || event?.args || {};
 
-        // Record metric
+        // Record metric — use stable GenAI attribute keys, keep legacy mirrors.
         counters.toolCalls.add(1, {
+          [GEN_AI_TOOL_NAME]: toolName,
+          [GEN_AI_OPERATION_NAME]: OP_EXECUTE_TOOL,
+          [GEN_AI_CONVERSATION_ID]: sessionKey,
           "tool.name": toolName,
           "session.key": sessionKey,
         });
@@ -227,12 +272,23 @@ export function registerHooks(
         const sessionCtx = sessionContextMap.get(sessionKey);
         const parentContext = sessionCtx?.agentContext || sessionCtx?.rootContext || context.active();
 
-        // Create tool span as child of agent turn
+        // Create tool span as child of agent turn.
+        // Span name follows GenAI stable: `execute_tool {tool.name}`.
         const span = tracer.startSpan(
-          `tool.${toolName}`,
+          spanNameExecuteTool(toolName),
           {
             kind: SpanKind.INTERNAL,
             attributes: {
+              // GenAI stable
+              [GEN_AI_OPERATION_NAME]: OP_EXECUTE_TOOL,
+              [GEN_AI_TOOL_NAME]: toolName,
+              [GEN_AI_TOOL_CALL_ID]: toolCallId,
+              [GEN_AI_CONVERSATION_ID]: sessionKey,
+              [GEN_AI_AGENT_ID]: agentId,
+              // code.*
+              [CODE_FUNCTION]: "tool_result_persist",
+              [CODE_NAMESPACE]: CODE_NS,
+              // openclaw legacy (preserve for dashboards)
               "openclaw.tool.name": toolName,
               "openclaw.tool.call_id": toolCallId,
               "openclaw.tool.is_synthetic": isSynthetic,
@@ -275,7 +331,11 @@ export function registerHooks(
           }
 
           if (message?.is_error === true || message?.isError === true) {
-            counters.toolErrors.add(1, { "tool.name": toolName });
+            counters.toolErrors.add(1, {
+              [GEN_AI_TOOL_NAME]: toolName,
+              "tool.name": toolName,
+            });
+            span.setAttribute(ERROR_TYPE, "tool_execution_error");
             span.setStatus({ code: SpanStatusCode.ERROR, message: "Tool execution error" });
           } else if (!securityEvent) {
             // Only set OK status if no security event
@@ -407,26 +467,45 @@ export function registerHooks(
           // (diagnostics module already records metrics on model.usage event)
           if (!diagUsage && (totalInputTokens > 0 || totalOutputTokens > 0)) {
             const metricAttrs = {
-              "gen_ai.response.model": model,
+              [GEN_AI_RESPONSE_MODEL]: model,
+              [GEN_AI_OPERATION_NAME]: OP_INVOKE_AGENT,
+              [GEN_AI_AGENT_ID]: agentId,
               "openclaw.agent.id": agentId,
             };
             counters.tokensPrompt.add(totalInputTokens + cacheReadTokens + cacheWriteTokens, metricAttrs);
             counters.tokensCompletion.add(totalOutputTokens, metricAttrs);
             counters.tokensTotal.add(totalTokens, metricAttrs);
             counters.llmRequests.add(1, metricAttrs);
-          }
 
-          // Record duration histogram
-          if (typeof durationMs === "number") {
-            histograms.agentTurnDuration.record(durationMs, {
-              "gen_ai.response.model": model,
-              "openclaw.agent.id": agentId,
+            // Stable GenAI token usage histogram (per gen_ai.token.type)
+            histograms.genAiTokenUsage.record(totalInputTokens + cacheReadTokens + cacheWriteTokens, {
+              ...metricAttrs,
+              [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_INPUT,
+            });
+            histograms.genAiTokenUsage.record(totalOutputTokens, {
+              ...metricAttrs,
+              [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_OUTPUT,
             });
           }
 
+          // Record duration histograms — legacy (ms) and stable GenAI (s).
+          if (typeof durationMs === "number") {
+            const durationAttrs = {
+              [GEN_AI_RESPONSE_MODEL]: model,
+              [GEN_AI_OPERATION_NAME]: OP_INVOKE_AGENT,
+              [GEN_AI_AGENT_ID]: agentId,
+              "openclaw.agent.id": agentId,
+            };
+            histograms.agentTurnDuration.record(durationMs, durationAttrs);
+            histograms.genAiOperationDuration.record(durationMs / 1000, durationAttrs);
+          }
+
           if (errorMsg) {
-            agentSpan.setAttribute("openclaw.agent.error", String(errorMsg).slice(0, 500));
-            agentSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(errorMsg).slice(0, 200) });
+            const errStr = String(errorMsg).slice(0, 500);
+            agentSpan.setAttribute("openclaw.agent.error", errStr);
+            agentSpan.setAttribute(ERROR_TYPE, "agent_error");
+            agentSpan.recordException({ name: "AgentError", message: errStr });
+            agentSpan.setStatus({ code: SpanStatusCode.ERROR, message: errStr.slice(0, 200) });
           } else {
             agentSpan.setStatus({ code: SpanStatusCode.OK });
           }
