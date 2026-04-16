@@ -67,25 +67,25 @@ const sessionContextMap = new Map<string, SessionTraceContext>();
 /**
  * Register all plugin hooks on the OpenClaw plugin API.
  *
- * `getTelemetry` is a lazy accessor: this function runs during the synchronous
- * `register()` phase so OpenClaw sees the typed hooks before the gateway boots,
- * but the telemetry runtime is initialised later in `start()`. Each hook reads
- * the current runtime when it fires; if telemetry is not ready yet (i.e. the
- * hook fires between register() and start()) the handler is a no-op.
+ * Both `initTelemetry()` and this function run during the synchronous
+ * `register()` phase so OpenClaw sees the typed hooks before the gateway
+ * boots AND so telemetry exists in embedded runner contexts (CLI agent,
+ * cron, heartbeat, task-runner, subagent) where `service.start()` is a
+ * no-op. The telemetry runtime is therefore non-null at hook-fire time.
  */
 export function registerHooks(
   api: any,
-  getTelemetry: () => TelemetryRuntime | null,
+  telemetry: TelemetryRuntime,
   config: OtelObservabilityConfig
 ): () => void {
   const logger = api.logger;
-
-  const buildSecurityCounters = (counters: TelemetryRuntime["counters"]): SecurityCounters => ({
+  const { tracer, counters, histograms } = telemetry;
+  const securityCounters: SecurityCounters = {
     securityEvents: counters.securityEvents,
     sensitiveFileAccess: counters.sensitiveFileAccess,
     promptInjection: counters.promptInjection,
     dangerousCommand: counters.dangerousCommand,
-  });
+  };
 
   // ═══════════════════════════════════════════════════════════════════
   // TYPED HOOKS — registered via api.on() into registry.typedHooks
@@ -98,10 +98,6 @@ export function registerHooks(
   api.on(
     "message_received",
     async (event: any, ctx: any) => {
-      const telemetry = getTelemetry();
-      if (!telemetry) return;
-      const { tracer, counters } = telemetry;
-      const securityCounters = buildSecurityCounters(counters);
       try {
         const channel = event?.channel || "unknown";
         const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
@@ -168,9 +164,6 @@ export function registerHooks(
   api.on(
     "before_agent_start",
     (event: any, ctx: any) => {
-      const telemetry = getTelemetry();
-      if (!telemetry) return undefined;
-      const { tracer } = telemetry;
       try {
         const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
         const agentId = event?.agentId || ctx?.agentId || "unknown";
@@ -245,10 +238,6 @@ export function registerHooks(
   api.on(
     "tool_result_persist",
     (event: any, ctx: any) => {
-      const telemetry = getTelemetry();
-      if (!telemetry) return undefined;
-      const { tracer, counters } = telemetry;
-      const securityCounters = buildSecurityCounters(counters);
       try {
         const toolName = event?.toolName || "unknown";
         const toolCallId = event?.toolCallId || "";
@@ -368,9 +357,6 @@ export function registerHooks(
   api.on(
     "agent_end",
     async (event: any, ctx: any) => {
-      const telemetry = getTelemetry();
-      if (!telemetry) return;
-      const { counters, histograms } = telemetry;
       try {
         const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
         const agentId = event?.agentId || ctx?.agentId || "unknown";
@@ -544,9 +530,6 @@ export function registerHooks(
   api.registerHook(
     ["command:new", "command:reset", "command:stop"],
     async (event: any) => {
-      const telemetry = getTelemetry();
-      if (!telemetry) return;
-      const { tracer, counters } = telemetry;
       try {
         const action = event?.action || "unknown";
         const sessionKey = event?.sessionKey || "unknown";
@@ -593,9 +576,6 @@ export function registerHooks(
   api.registerHook(
     "gateway:startup",
     async (event: any) => {
-      const telemetry = getTelemetry();
-      if (!telemetry) return;
-      const { tracer } = telemetry;
       try {
         const span = tracer.startSpan("openclaw.gateway.startup", {
           kind: SpanKind.INTERNAL,
