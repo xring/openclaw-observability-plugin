@@ -54,6 +54,13 @@ const otelObservabilityPlugin = {
     let telemetry: TelemetryRuntime | null = null;
     let unsubscribeDiagnostics: (() => void) | null = null;
 
+    // ── Hooks (must be registered synchronously in register()) ──────
+    // OpenClaw snapshots typed hooks at plugin registration time, so
+    // registering them later inside service.start() means our listeners
+    // are never seen by the gateway. We register here and pass a lazy
+    // telemetry getter; hooks no-op until start() has built the runtime.
+    registerHooks(api, () => telemetry, config);
+
     // ── RPC: status endpoint ────────────────────────────────────────
 
     api.registerGatewayMethod(
@@ -118,11 +125,10 @@ const otelObservabilityPlugin = {
           await initOpenLLMetry(config, logger);
         }
 
-        // 3. Register hooks for tool results and command events
-        registerHooks(api, telemetry, config);
-
-        // 4. Subscribe to OpenClaw diagnostic events (model.usage, etc.)
-        //    This gives us cost data and accurate token counts
+        // 3. Subscribe to OpenClaw diagnostic events (model.usage, etc.)
+        //    This gives us cost data and accurate token counts.
+        //    (Hooks themselves are registered in register() above so they
+        //    are visible to the gateway before it finishes booting.)
         unsubscribeDiagnostics = await registerDiagnosticsListener(telemetry, logger);
         if (hasDiagnosticsSupport()) {
           logger.info("[otel] ✅ Integrated with OpenClaw diagnostics (cost tracking enabled)");
