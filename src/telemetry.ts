@@ -21,6 +21,12 @@ import { OTLPMetricExporter as OTLPMetricExporterHTTP } from "@opentelemetry/exp
 import { OTLPMetricExporter as OTLPMetricExporterGRPC } from "@opentelemetry/exporter-metrics-otlp-grpc";
 
 import type { OtelObservabilityConfig } from "./config.js";
+import {
+  METRIC_OPERATION_DURATION,
+  METRIC_TOKEN_USAGE,
+  OC_SCHEMA_VERSION,
+  OPENCLAW_SCHEMA_VERSION,
+} from "./semconv.js";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -71,6 +77,10 @@ export interface OtelHistograms {
   toolDuration: Histogram;
   /** Agent turn duration in ms */
   agentTurnDuration: Histogram;
+  /** Stable GenAI client operation duration (seconds). */
+  genAiOperationDuration: Histogram;
+  /** Stable GenAI client token usage (tokens); use with gen_ai.token.type attr. */
+  genAiTokenUsage: Histogram;
 }
 
 export interface OtelGauges {
@@ -85,6 +95,7 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     [ATTR_SERVICE_NAME]: config.serviceName,
     [ATTR_SERVICE_VERSION]: "0.1.0",
     "openclaw.plugin": "otel-observability",
+    [OC_SCHEMA_VERSION]: OPENCLAW_SCHEMA_VERSION,
     ...config.resourceAttributes,
   };
 
@@ -223,6 +234,14 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     agentTurnDuration: meter.createHistogram("openclaw.agent.turn_duration", {
       description: "Full agent turn duration (LLM + tools)",
       unit: "ms",
+    }),
+    genAiOperationDuration: meter.createHistogram(METRIC_OPERATION_DURATION, {
+      description: "GenAI operation duration (stable semconv)",
+      unit: "s",
+    }),
+    genAiTokenUsage: meter.createHistogram(METRIC_TOKEN_USAGE, {
+      description: "Number of input and output tokens used (stable semconv)",
+      unit: "{token}",
     }),
   };
 

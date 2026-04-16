@@ -1,0 +1,90 @@
+/**
+ * OpenTelemetry attribute keys used by this plugin.
+ *
+ * Centralised so the same constant is referenced on spans, metrics, and docs,
+ * and so a future Weaver-generated schema can replace this file without
+ * touching every call site.
+ *
+ * References:
+ *   - gen_ai.* stable conventions (GenAI agents / tools / tokens)
+ *   - exception.* / error.type (general conventions)
+ *   - code.* (general conventions)
+ *   - openclaw.* keys are plugin-domain attributes not covered by OTel semconv;
+ *     they are kept as legacy mirrors alongside the standard gen_ai.* keys to
+ *     preserve existing Dynatrace dashboards during the rollout window.
+ */
+
+// ── GenAI stable attribute keys ─────────────────────────────────────
+export const GEN_AI_SYSTEM = "gen_ai.system";
+export const GEN_AI_OPERATION_NAME = "gen_ai.operation.name";
+export const GEN_AI_REQUEST_MODEL = "gen_ai.request.model";
+export const GEN_AI_RESPONSE_MODEL = "gen_ai.response.model";
+export const GEN_AI_CONVERSATION_ID = "gen_ai.conversation.id";
+export const GEN_AI_AGENT_ID = "gen_ai.agent.id";
+export const GEN_AI_AGENT_NAME = "gen_ai.agent.name";
+export const GEN_AI_TOOL_NAME = "gen_ai.tool.name";
+export const GEN_AI_TOOL_CALL_ID = "gen_ai.tool.call.id";
+export const GEN_AI_TOOL_TYPE = "gen_ai.tool.type";
+export const GEN_AI_USAGE_INPUT_TOKENS = "gen_ai.usage.input_tokens";
+export const GEN_AI_USAGE_OUTPUT_TOKENS = "gen_ai.usage.output_tokens";
+export const GEN_AI_USAGE_TOTAL_TOKENS = "gen_ai.usage.total_tokens";
+/** Non-stable but de-facto — cache tokens are not yet covered by stable semconv. */
+export const GEN_AI_USAGE_CACHE_READ_TOKENS = "gen_ai.usage.cache_read_tokens";
+export const GEN_AI_USAGE_CACHE_WRITE_TOKENS = "gen_ai.usage.cache_write_tokens";
+/** Used on `gen_ai.client.token.usage` histogram to distinguish input / output. */
+export const GEN_AI_TOKEN_TYPE = "gen_ai.token.type";
+
+// ── GenAI operation name values ─────────────────────────────────────
+export const OP_INVOKE_AGENT = "invoke_agent";
+export const OP_EXECUTE_TOOL = "execute_tool";
+export const OP_CHAT = "chat";
+
+// ── GenAI stable metric names ───────────────────────────────────────
+export const METRIC_TOKEN_USAGE = "gen_ai.client.token.usage";
+export const METRIC_OPERATION_DURATION = "gen_ai.client.operation.duration";
+
+// ── GenAI span name helpers ─────────────────────────────────────────
+export const spanNameInvokeAgent = (agentName: string): string =>
+  `${OP_INVOKE_AGENT} ${agentName}`;
+export const spanNameExecuteTool = (toolName: string): string =>
+  `${OP_EXECUTE_TOOL} ${toolName}`;
+
+// ── Error / exception conventions ───────────────────────────────────
+export const ERROR_TYPE = "error.type";
+
+// ── Code conventions ────────────────────────────────────────────────
+export const CODE_FUNCTION = "code.function";
+export const CODE_NAMESPACE = "code.namespace";
+
+// ── Plugin-domain (legacy) attribute keys ───────────────────────────
+export const OC_AGENT_ID = "openclaw.agent.id";
+export const OC_AGENT_MODEL = "openclaw.agent.model";
+export const OC_AGENT_DURATION_MS = "openclaw.agent.duration_ms";
+export const OC_AGENT_SUCCESS = "openclaw.agent.success";
+export const OC_AGENT_ERROR = "openclaw.agent.error";
+export const OC_SESSION_KEY = "openclaw.session.key";
+export const OC_TOOL_NAME = "openclaw.tool.name";
+export const OC_TOOL_CALL_ID = "openclaw.tool.call_id";
+export const OC_TOOL_IS_SYNTHETIC = "openclaw.tool.is_synthetic";
+export const OC_TOOL_RESULT_CHARS = "openclaw.tool.result_chars";
+export const OC_TOOL_RESULT_PARTS = "openclaw.tool.result_parts";
+export const OC_TOOL_INPUT_PREVIEW = "openclaw.tool.input_preview";
+export const OC_MESSAGE_CHANNEL = "openclaw.message.channel";
+export const OC_MESSAGE_DIRECTION = "openclaw.message.direction";
+export const OC_MESSAGE_FROM = "openclaw.message.from";
+export const OC_REQUEST_DURATION_MS = "openclaw.request.duration_ms";
+export const OC_LLM_COST_USD = "openclaw.llm.cost_usd";
+export const OC_CONTEXT_LIMIT = "openclaw.context.limit";
+export const OC_CONTEXT_USED = "openclaw.context.used";
+export const OC_PROVIDER = "openclaw.provider";
+export const OC_SCHEMA_VERSION = "openclaw.schema.version";
+
+/**
+ * Schema version for plugin-domain attributes. Bump when emitted
+ * attribute keys or values change in a way that consumers need to know.
+ */
+export const OPENCLAW_SCHEMA_VERSION = "1.0.0";
+
+// ── Token type values ───────────────────────────────────────────────
+export const TOKEN_TYPE_INPUT = "input";
+export const TOKEN_TYPE_OUTPUT = "output";

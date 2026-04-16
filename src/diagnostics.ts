@@ -9,6 +9,17 @@
 
 import type { Span } from "@opentelemetry/api";
 import type { TelemetryRuntime } from "./telemetry.js";
+import {
+  GEN_AI_CONVERSATION_ID,
+  GEN_AI_OPERATION_NAME,
+  GEN_AI_RESPONSE_MODEL,
+  GEN_AI_SYSTEM,
+  GEN_AI_TOKEN_TYPE,
+  OP_INVOKE_AGENT,
+  OC_PROVIDER,
+  TOKEN_TYPE_INPUT,
+  TOKEN_TYPE_OUTPUT,
+} from "./semconv.js";
 
 // Import from OpenClaw plugin SDK (loaded lazily)
 let onDiagnosticEvent: ((listener: (evt: any) => void) => () => void) | null = null;
@@ -89,17 +100,29 @@ export async function registerDiagnosticsListener(
       model,
     });
 
-    // Record metrics immediately (don't wait for span)
+    // Record metrics immediately (don't wait for span).
+    // Use stable GenAI attribute keys; keep openclaw.* mirrors for dashboards.
     const metricAttrs = {
-      "gen_ai.response.model": model,
-      "openclaw.provider": provider,
+      [GEN_AI_RESPONSE_MODEL]: model,
+      [GEN_AI_SYSTEM]: provider,
+      [GEN_AI_OPERATION_NAME]: OP_INVOKE_AGENT,
+      [GEN_AI_CONVERSATION_ID]: sessionKey,
+      [OC_PROVIDER]: provider,
     };
 
     if (usage.input) {
       counters.tokensPrompt.add(usage.input, metricAttrs);
+      histograms.genAiTokenUsage.record(usage.input, {
+        ...metricAttrs,
+        [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_INPUT,
+      });
     }
     if (usage.output) {
       counters.tokensCompletion.add(usage.output, metricAttrs);
+      histograms.genAiTokenUsage.record(usage.output, {
+        ...metricAttrs,
+        [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_OUTPUT,
+      });
     }
     if (usage.cacheRead) {
       counters.tokensPrompt.add(usage.cacheRead, { ...metricAttrs, "token.type": "cache_read" });
@@ -119,9 +142,10 @@ export async function registerDiagnosticsListener(
       }).add(costUsd, metricAttrs);
     }
 
-    // Record LLM duration
+    // Record LLM duration — legacy (ms) and stable GenAI (seconds).
     if (typeof evt.durationMs === "number") {
       histograms.llmDuration.record(evt.durationMs, metricAttrs);
+      histograms.genAiOperationDuration.record(evt.durationMs / 1000, metricAttrs);
     }
 
     counters.llmRequests.add(1, metricAttrs);
