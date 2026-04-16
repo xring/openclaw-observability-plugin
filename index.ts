@@ -53,15 +53,27 @@ const otelObservabilityPlugin = {
 
     let telemetry: TelemetryRuntime | null = null;
     let unsubscribeDiagnostics: (() => void) | null = null;
+    let stopHooks: (() => void) | null = null;
 
-    // ── Hooks (must be registered synchronously in register()) ──────
-    // OpenClaw snapshots typed hooks at plugin registration time, so
-    // registering them later inside service.start() means our listeners
-    // are never seen by the gateway. We register here and pass a lazy
-    // telemetry getter; hooks no-op until start() has built the runtime.
-    // registerHooks returns a cleanup fn (clears the stale-session sweeper
-    // interval) so service.stop() doesn't leak the timer across reloads.
-    let stopHooks: (() => void) | null = registerHooks(api, () => telemetry, config);
+    // ── Telemetry + hooks (init at register() time) ─────────────────
+    // Both MUST run during register() so they work in every OpenClaw
+    // context, not just the gateway:
+    //   - Hooks: OpenClaw snapshots typed hooks at plugin registration,
+    //     so registering later means the gateway never sees them.
+    //   - Telemetry: api.registerService.start() is a no-op in embedded
+    //     runner contexts (openclaw agent CLI, cron, heartbeat,
+    //     task-runner, subagent — see openclaw src/plugins/api-builder.ts).
+    //     Initializing inside start() means telemetry stays null in
+    //     those contexts and every hook is a no-op.
+    // registerHooks returns a cleanup fn (clears the stale-session
+    // sweeper interval) so service.stop() doesn't leak the timer.
+    try {
+      telemetry = initTelemetry(config, logger);
+      stopHooks = registerHooks(api, telemetry, config);
+      logger.info("[otel] Telemetry + hooks initialized at register() (runner-compatible)");
+    } catch (err) {
+      logger.error(`[otel] Failed to initialize telemetry at register() time: ${String(err)}`);
+    }
 
     // ── RPC: status endpoint ────────────────────────────────────────
 
@@ -114,29 +126,32 @@ const otelObservabilityPlugin = {
       id: "otel-observability",
 
       start: async () => {
-        logger.info("[otel] Starting OpenTelemetry observability...");
+        logger.info("[otel] Starting OpenTelemetry observability (gateway-only init)...");
 
-        // 1. Initialize our OTel providers FIRST (traces + metrics)
-        //    This registers our TracerProvider as global, so all spans
-        //    (including GenAI wraps) export through our pipeline.
-        telemetry = initTelemetry(config, logger);
+        // Telemetry + hooks are already initialized at register() time so
+        // they work in both gateway and embedded runner contexts. Only
+        // gateway-specific work lives here.
 
-        // 2. Wrap LLM SDKs AFTER provider is registered
-        //    The wraps use trace.getTracer() which goes through our provider.
+        // 1. Wrap LLM SDKs. The wraps use trace.getTracer() which goes
+        //    through the provider we registered above. OpenLLMetry's
+        //    IITM preload only matters in the long-running gateway
+        //    process, so leave it here.
         if (config.traces) {
           await initOpenLLMetry(config, logger);
         }
 
-        // 3. Subscribe to OpenClaw diagnostic events (model.usage, etc.)
-        //    This gives us cost data and accurate token counts.
-        //    (Hooks themselves are registered in register() above so they
-        //    are visible to the gateway before it finishes booting.)
-        unsubscribeDiagnostics = await registerDiagnosticsListener(telemetry, logger);
-        if (hasDiagnosticsSupport()) {
-          logger.info("[otel] ✅ Integrated with OpenClaw diagnostics (cost tracking enabled)");
+        // 2. Subscribe to OpenClaw diagnostic events (model.usage, etc.)
+        //    for cost + accurate token counts. These events are emitted
+        //    from the gateway process, so the listener only needs to
+        //    live there.
+        if (telemetry) {
+          unsubscribeDiagnostics = await registerDiagnosticsListener(telemetry, logger);
+          if (hasDiagnosticsSupport()) {
+            logger.info("[otel] ✅ Integrated with OpenClaw diagnostics (cost tracking enabled)");
+          }
         }
 
-        logger.info("[otel] ✅ Observability pipeline active");
+        logger.info("[otel] ✅ Observability pipeline active (gateway-side)");
         logger.info(
           `[otel]   Traces=${config.traces} Metrics=${config.metrics} Logs=${config.logs}`
         );
