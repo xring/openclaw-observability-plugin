@@ -53,7 +53,7 @@ export function registerHooks(
   api: any,
   getTelemetry: () => TelemetryRuntime | null,
   config: OtelObservabilityConfig
-): void {
+): () => void {
   const logger = api.logger;
 
   const buildSecurityCounters = (counters: TelemetryRuntime["counters"]): SecurityCounters => ({
@@ -540,8 +540,10 @@ export function registerHooks(
   logger.info("[otel] Registered gateway:startup hook (via api.registerHook)");
 
   // ── Periodic cleanup ─────────────────────────────────────────────
-  // Safety net: clean up stale session contexts (e.g., if agent_end never fires)
-  setInterval(() => {
+  // Safety net: clean up stale session contexts (e.g., if agent_end never fires).
+  // The handle is returned to the caller so service.stop() can clear it and
+  // avoid leaking timers across plugin reload / shutdown.
+  const cleanupInterval = setInterval(() => {
     const now = Date.now();
     const maxAge = 5 * 60 * 1000; // 5 minutes
     for (const [key, ctx] of sessionContextMap) {
@@ -555,4 +557,8 @@ export function registerHooks(
       }
     }
   }, 60_000);
+
+  return () => {
+    clearInterval(cleanupInterval);
+  };
 }

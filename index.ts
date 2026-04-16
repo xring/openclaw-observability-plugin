@@ -59,7 +59,9 @@ const otelObservabilityPlugin = {
     // registering them later inside service.start() means our listeners
     // are never seen by the gateway. We register here and pass a lazy
     // telemetry getter; hooks no-op until start() has built the runtime.
-    registerHooks(api, () => telemetry, config);
+    // registerHooks returns a cleanup fn (clears the stale-session sweeper
+    // interval) so service.stop() doesn't leak the timer across reloads.
+    let stopHooks: (() => void) | null = registerHooks(api, () => telemetry, config);
 
     // ── RPC: status endpoint ────────────────────────────────────────
 
@@ -142,6 +144,10 @@ const otelObservabilityPlugin = {
       },
 
       stop: async () => {
+        if (stopHooks) {
+          stopHooks();
+          stopHooks = null;
+        }
         if (unsubscribeDiagnostics) {
           unsubscribeDiagnostics();
           unsubscribeDiagnostics = null;
