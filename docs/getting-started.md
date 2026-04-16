@@ -96,7 +96,40 @@ systemctl --user restart openclaw-gateway
 
 ### Step 5: Verify Connected Traces
 
-Send a message that triggers tool calls (e.g., "read my AGENTS.md file"). You should see:
+First, confirm the plugin is wired into the gateway. Tail the gateway log during startup:
+
+```bash
+journalctl --user -u openclaw-gateway -f | grep -E '\[otel\]'
+```
+
+You should see these lines **during `register()`** (before the gateway accepts traffic):
+
+```
+[otel] Registered message_received hook (via api.on)
+[otel] Registered before_agent_start hook (via api.on)
+[otel] Registered tool_result_persist hook (via api.on)
+[otel] Registered agent_end hook (via api.on)
+[otel] Registered command event hooks (via api.registerHook)
+[otel] Registered gateway:startup hook (via api.registerHook)
+```
+
+Then, **during `start()`** (after the gateway is ready):
+
+```
+[otel] Starting OpenTelemetry observability...
+[otel] ✅ Observability pipeline active
+[otel]   Traces=true Metrics=true Logs=true
+[otel]   Endpoint=http://localhost:4318 (http)
+```
+
+Now send a message that triggers tool calls (e.g., "read my AGENTS.md file"). On each inbound message, debug-level logs confirm hooks are firing:
+
+```
+[otel] Root span started for session=<sessionKey>
+[otel] Agent turn span started: agent=<agentId>, session=<sessionKey>
+```
+
+In your backend you should see a connected trace:
 
 ```
 openclaw.request
@@ -280,6 +313,41 @@ No collector needed:
 ### Traces not connected?
 
 The custom plugin requires messages to flow through the normal pipeline. Heartbeats and some internal events may not have full trace context.
+
+### Hooks register but never fire
+
+**Symptom:** Gateway logs `[otel] ✅ Observability pipeline active`, but no `openclaw.request` or `tool.*` spans reach your backend when you send messages.
+
+**Cause (pre-PR #6):** Earlier builds registered typed hooks from inside the async `service.start()` phase. OpenClaw snapshots typed hooks at plugin registration time — ~30 s before `start()` runs — so the gateway never saw the 15 hook listeners. Tracked as [ISI-515](https://github.com/henrikrexed/openclaw-observability-plugin/pull/6).
+
+**Fix:** Upgrade to a build that includes PR #6. Hooks are now registered synchronously in `register()` and resolve the telemetry runtime through a lazy getter.
+
+**How to confirm hooks are live:**
+
+1. During gateway startup, look for all six registration lines from `register()`:
+   ```
+   [otel] Registered message_received hook (via api.on)
+   [otel] Registered before_agent_start hook (via api.on)
+   [otel] Registered tool_result_persist hook (via api.on)
+   [otel] Registered agent_end hook (via api.on)
+   [otel] Registered command event hooks (via api.registerHook)
+   [otel] Registered gateway:startup hook (via api.registerHook)
+   ```
+   If these are missing, the plugin is not loaded — recheck `plugins.load.paths` and clear `/tmp/jiti`.
+
+2. Send a real message through the pipeline and enable debug logging. You should see:
+   ```
+   [otel] Root span started for session=<sessionKey>
+   [otel] Agent turn span started: agent=<agentId>, session=<sessionKey>
+   ```
+   If registration lines are present but these are missing, the gateway is not firing hooks for that event path (e.g., heartbeats skip `message_received`).
+
+3. Verify the OTLP endpoint is reachable:
+   ```bash
+   curl -v http://localhost:4318/v1/traces
+   ```
+
+See [Architecture → Plugin Lifecycle](architecture.md#plugin-lifecycle) for why the `register()` vs `start()` split matters.
 
 ---
 
