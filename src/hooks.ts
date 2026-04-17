@@ -622,13 +622,34 @@ export function registerHooks(
         const sessionCtx = sessionContextMap.get(sessionKey);
 
         // Safety net: close any leftover in-flight LLM span so it
-        // doesn't leak past the agent turn (e.g., when llm_output
-        // never fires due to provider error).
+        // doesn't leak past the agent turn.
+        // Some providers (e.g., ZAI/GLM) don't emit llm_output events,
+        // so we populate the span with token data from agent_end diagnostics
+        // and close it with OK status instead of ERROR.
         if (sessionCtx?.llmSpan) {
           try {
+            // Populate token data from agent_end diagnostics if available
+            if (totalInputTokens > 0) {
+              sessionCtx.llmSpan.setAttribute("gen_ai.usage.input_tokens", totalInputTokens);
+            }
+            if (totalOutputTokens > 0) {
+              sessionCtx.llmSpan.setAttribute("gen_ai.usage.output_tokens", totalOutputTokens);
+            }
+            if (cacheReadTokens > 0) {
+              sessionCtx.llmSpan.setAttribute("gen_ai.usage.cache_read_tokens", cacheReadTokens);
+            }
+            if (cacheWriteTokens > 0) {
+              sessionCtx.llmSpan.setAttribute("gen_ai.usage.cache_write_tokens", cacheWriteTokens);
+            }
+            const llmDurationMs = sessionCtx.llmStartTime
+              ? Date.now() - sessionCtx.llmStartTime
+              : undefined;
+            if (typeof llmDurationMs === "number") {
+              sessionCtx.llmSpan.setAttribute("openclaw.llm.duration_ms", llmDurationMs);
+            }
             sessionCtx.llmSpan.setStatus({
-              code: SpanStatusCode.ERROR,
-              message: "llm_output did not fire before agent_end",
+              code: SpanStatusCode.OK,
+              message: "closed by agent_end (provider did not emit llm_output)",
             });
             sessionCtx.llmSpan.end();
           } catch { /* ignore */ }
