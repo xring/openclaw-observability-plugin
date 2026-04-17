@@ -19,6 +19,11 @@ These policies complement the plugin's application-layer security detection:
 | 05 | `dangerous-commands.yaml` | Destructive/exfil commands | Detection 3: Dangerous Commands |
 | 06 | `kernel-modules.yaml` | Rootkit loading | General security |
 | 07 | `prompt-injection-shell.yaml` | Injected shell commands | Detection 2: Prompt Injection |
+| 08 | `network-exfiltration.yaml` | DNS/HTTP data exfiltration | CVE-2025-55284, Agent Commander C2 |
+| 09 | `supply-chain.yaml` | Malicious package installs | LiteLLM 1.82.8, Trivy compromise |
+| 10 | `persistence-tampering.yaml` | Config/memory manipulation | HEARTBEAT.md backdoor, Skill overwrite |
+| 11 | `obfuscation-encoding.yaml` | Encoded/obfuscated payloads | Unicode tag steganography, base64 |
+| 12 | `git-operations.yaml` | Git credential theft/repo tampering | Force push, credential exposure |
 
 ## Installation
 

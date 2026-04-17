@@ -1,0 +1,71 @@
+# Detect file-based persistence and configuration tampering
+# Defense against:
+#   - Agent Commander persistence via HEARTBEAT.md (embracethered, Mar 2026)
+#   - Cross-agent skill overwrite attacks (embracethered, Sep 2025)
+#   - SOUL.md / IDENTITY.md / MEMORY.md manipulation
+#   - Writing to agent config files to maintain backdoors
+#   - Crontab/at persistence (extends policy 05)
+#
+# Monitors writes to OpenClaw configuration and memory files:
+#   - HEARTBEAT.md, SOUL.md, MEMORY.md, IDENTITY.md
+#   - openclaw.json, openclaw.yaml
+#   - Plugin directories
+#   - Crontab modifications
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: openclaw-persistence-tampering
+spec:
+  kprobes:
+    # Monitor file write/close for sensitive config paths
+    - call: "security_file_open"
+      syscall: false
+      args:
+        - index: 0
+          type: "file"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchArgs:
+            - index: 0
+              operator: "In"
+              values:
+                # Agent memory and identity files
+                - "HEARTBEAT.md"
+                - "SOUL.md"
+                - "MEMORY.md"
+                - "IDENTITY.md"
+                - "AGENTS.md"
+                # OpenClaw config
+                - "openclaw.json"
+                - "openclaw.yaml"
+                # Plugin configs
+                - "SKILL.md"
+                - "openclaw.plugin.json"
+          matchActions:
+            - action: Post
+
+    # Monitor crontab execution (common persistence mechanism)
+    - call: "sys_execve"
+      syscall: true
+      args:
+        - index: 0
+          type: "string"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchArgs:
+            - index: 0
+              operator: "In"
+              values:
+                - "/usr/bin/crontab"
+                - "/usr/bin/at"
+                - "/usr/bin/systemctl"
+          matchActions:
+            - action: Post
