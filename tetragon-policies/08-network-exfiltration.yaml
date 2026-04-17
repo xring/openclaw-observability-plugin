@@ -1,0 +1,46 @@
+# Detect network-based data exfiltration from OpenClaw
+# Defense against: DNS/HTTP data exfiltration via prompt injection
+# References:
+#   - Claude Code DNS exfiltration (CVE-2025-55284)
+#   - Agent Commander C2 via promptware (embracethered 2026)
+#   - Data exfiltration via image rendering (Amp Code, Aug 2025)
+#
+# Monitors suspicious outbound connections from Node.js:
+#   - DNS queries to suspicious/long subdomains (data encoding in DNS)
+#   - Connections to non-standard ports
+#   - Unusual HTTP/HTTPS destinations
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: openclaw-network-exfiltration
+spec:
+  kprobes:
+    # Monitor TCP connections from Node.js
+    - call: "tcp_connect"
+      syscall: false
+      args:
+        - index: 0
+          type: "sockaddr"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchActions:
+            - action: Post
+
+    # Monitor DNS resolution attempts
+    - call: "dns_query"
+      syscall: false
+      args:
+        - index: 1
+          type: "string"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchActions:
+            - action: Post

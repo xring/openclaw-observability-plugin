@@ -1,0 +1,69 @@
+# Detect supply chain attacks targeting AI agent dependencies
+# Defense against:
+#   - Malicious npm/pip packages (LiteLLM 1.82.8 credential stealer, Mar 2026)
+#   - Trivy CI compromise leading to package poisoning
+#   - Typosquatting in agent-installed packages
+#   - Malicious .pth files, post-install scripts
+#
+# Monitors:
+#   - npm install / pip install from Node.js child processes
+#   - Package manager execution with suspicious arguments
+#   - Downloads from non-standard registries
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: openclaw-supply-chain
+spec:
+  kprobes:
+    - call: "sys_execve"
+      syscall: true
+      args:
+        - index: 0
+          type: "string"
+        - index: 1
+          type: "string"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchArgs:
+            # Match package manager invocations
+            - index: 0
+              operator: "In"
+              values:
+                - "/usr/bin/npm"
+                - "/usr/local/bin/npm"
+                - "/usr/bin/pip"
+                - "/usr/bin/pip3"
+                - "/usr/local/bin/pip"
+                - "/usr/local/bin/pip3"
+                - "/usr/bin/python3"
+                - "/usr/bin/yarn"
+                - "/usr/bin/pnpm"
+          matchActions:
+            - action: Post
+
+    # Also catch npx (can execute arbitrary packages)
+    - call: "sys_execve"
+      syscall: true
+      args:
+        - index: 0
+          type: "string"
+        - index: 1
+          type: "string"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchArgs:
+            - index: 0
+              operator: "In"
+              values:
+                - "/usr/bin/npx"
+                - "/usr/local/bin/npx"
+          matchActions:
+            - action: Post

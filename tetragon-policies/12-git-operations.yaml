@@ -1,0 +1,60 @@
+# Detect git operations that indicate credential theft or repo manipulation
+# Defense against:
+#   - Credential theft via git config manipulation
+#   - Force pushing to main (Claude Code auto-mode soft_deny)
+#   - Git credential exposure
+#   - Pushing secrets to remote repos
+#
+# Monitors:
+#   - git push operations
+#   - git config changes (credential helper, URL rewriting)
+#   - Access to .git-credentials, .gitconfig
+#   - Force push flags
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: openclaw-git-operations
+spec:
+  kprobes:
+    - call: "sys_execve"
+      syscall: true
+      args:
+        - index: 0
+          type: "string"
+        - index: 1
+          type: "string"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchArgs:
+            - index: 0
+              operator: "In"
+              values:
+                - "/usr/bin/git"
+          matchActions:
+            - action: Post
+
+    # Monitor access to git credential files
+    - call: "security_file_open"
+      syscall: false
+      args:
+        - index: 0
+          type: "file"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchArgs:
+            - index: 0
+              operator: "In"
+              values:
+                - ".git-credentials"
+                - ".gitconfig"
+                - ".netrc"
+          matchActions:
+            - action: Post

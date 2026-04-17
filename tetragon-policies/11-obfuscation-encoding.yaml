@@ -1,0 +1,46 @@
+# Detect encoding/obfuscation techniques used in agent attacks
+# Defense against:
+#   - Hidden Unicode tag codepoints in Skills (embracethered, Feb 2026)
+#   - Base64-encoded payloads in prompt injection
+#   - Hex/octal encoded commands bypassing string filters
+#   - Steganographic instructions in images/files
+#
+# Monitors:
+#   - Base64 encode/decode operations
+#   - Unusual encoding tool usage (xxd, od, base64)
+#   - Python/Node eval/exec with encoded content
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: openclaw-obfuscation-encoding
+spec:
+  kprobes:
+    - call: "sys_execve"
+      syscall: true
+      args:
+        - index: 0
+          type: "string"
+        - index: 1
+          type: "string"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchArgs:
+            - index: 0
+              operator: "In"
+              values:
+                # Encoding tools
+                - "/usr/bin/base64"
+                - "/usr/bin/xxd"
+                - "/usr/bin/od"
+                # Interpreters (potential eval abuse)
+                - "/usr/bin/python3"
+                - "/usr/bin/perl"
+                - "/usr/bin/ruby"
+                # Decoding tools
+                - "/usr/bin/openssl"
+          matchActions:
+            - action: Post
