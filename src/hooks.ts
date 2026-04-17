@@ -40,6 +40,7 @@ import {
   GEN_AI_TOOL_NAME,
   GEN_AI_USAGE_INPUT_TOKENS,
   GEN_AI_USAGE_OUTPUT_TOKENS,
+  OP_CHAT,
   OP_EXECUTE_TOOL,
   OP_INVOKE_AGENT,
   TOKEN_TYPE_INPUT,
@@ -58,6 +59,10 @@ interface SessionTraceContext {
   rootContext: Context;
   agentSpan?: Span;
   agentContext?: Context;
+  /** Current in-flight LLM call span, set on `llm_input`, closed on `llm_output`. */
+  llmSpan?: Span;
+  /** When the in-flight LLM call started (monotonic ms), for duration fallback. */
+  llmStartTime?: number;
   startTime: number;
 }
 
@@ -231,6 +236,149 @@ export function registerHooks(
 
   logger.info("[otel] Registered before_agent_start hook (via api.on)");
 
+  // ── llm_input ────────────────────────────────────────────────────
+  // Start a CLIENT span for the outbound LLM call. The span is the
+  // OpenClaw-level record of the round-trip (not the HTTP transport
+  // layer — OpenLLMetry's AnthropicInstrumentation covers that if
+  // the preload is active). Closed in `llm_output`.
+
+  api.on(
+    "llm_input",
+    (event: any, ctx: any) => {
+      try {
+        const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
+        const agentId = event?.agentId || ctx?.agentId || "unknown";
+        const model = event?.model || event?.requestModel || ctx?.model || "unknown";
+        const provider = event?.provider || ctx?.provider || "unknown";
+
+        const sessionCtx = sessionContextMap.get(sessionKey);
+        // If llm_input fires without a prior agent span (unusual), fall back
+        // to root context so the CLIENT span still attaches to the trace.
+        const parentContext =
+          sessionCtx?.agentContext || sessionCtx?.rootContext || context.active();
+
+        const llmSpan = tracer.startSpan(
+          "openclaw.llm.call",
+          {
+            kind: SpanKind.CLIENT,
+            attributes: {
+              // GenAI stable
+              [GEN_AI_OPERATION_NAME]: OP_CHAT,
+              [GEN_AI_SYSTEM]: provider,
+              [GEN_AI_REQUEST_MODEL]: model,
+              [GEN_AI_CONVERSATION_ID]: sessionKey,
+              [GEN_AI_AGENT_ID]: agentId,
+              // code.*
+              [CODE_FUNCTION]: "llm_input",
+              [CODE_NAMESPACE]: CODE_NS,
+              // openclaw legacy
+              "openclaw.agent.id": agentId,
+              "openclaw.session.key": sessionKey,
+              "openclaw.llm.provider": provider,
+              "openclaw.llm.request_model": model,
+            },
+          },
+          parentContext
+        );
+
+        if (sessionCtx) {
+          sessionCtx.llmSpan = llmSpan;
+          sessionCtx.llmStartTime = Date.now();
+        } else {
+          // No session context at all — end the span right away to avoid
+          // leaking an in-flight span with no closer.
+          llmSpan.setStatus({ code: SpanStatusCode.OK });
+          llmSpan.end();
+        }
+
+        logger.debug?.(`[otel] LLM call span started: session=${sessionKey}, model=${model}`);
+      } catch {
+        // Never let telemetry errors break the main flow
+      }
+
+      return undefined;
+    },
+    { priority: 80 }
+  );
+
+  logger.info("[otel] Registered llm_input hook (via api.on)");
+
+  // ── llm_output ───────────────────────────────────────────────────
+  // Closes the CLIENT span opened in `llm_input`, recording response
+  // model, token counts, and (when available) error state.
+
+  api.on(
+    "llm_output",
+    (event: any, ctx: any) => {
+      try {
+        const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
+        const sessionCtx = sessionContextMap.get(sessionKey);
+        const llmSpan = sessionCtx?.llmSpan;
+        if (!llmSpan) return undefined;
+
+        const responseModel =
+          event?.responseModel || event?.model || ctx?.model || "unknown";
+        const usage = event?.usage || {};
+        const inputTokens =
+          usage.input ?? usage.inputTokens ?? usage.input_tokens ?? 0;
+        const outputTokens =
+          usage.output ?? usage.outputTokens ?? usage.output_tokens ?? 0;
+        const cacheRead = usage.cacheRead ?? usage.cache_read_tokens ?? 0;
+        const cacheWrite = usage.cacheWrite ?? usage.cache_write_tokens ?? 0;
+        const totalTokens =
+          usage.total ?? inputTokens + outputTokens + cacheRead + cacheWrite;
+
+        llmSpan.setAttribute(GEN_AI_RESPONSE_MODEL, responseModel);
+        if (inputTokens > 0) {
+          llmSpan.setAttribute("gen_ai.usage.input_tokens", inputTokens);
+        }
+        if (outputTokens > 0) {
+          llmSpan.setAttribute("gen_ai.usage.output_tokens", outputTokens);
+        }
+        if (cacheRead > 0) {
+          llmSpan.setAttribute("gen_ai.usage.cache_read_tokens", cacheRead);
+        }
+        if (cacheWrite > 0) {
+          llmSpan.setAttribute("gen_ai.usage.cache_write_tokens", cacheWrite);
+        }
+        if (totalTokens > 0) {
+          llmSpan.setAttribute("gen_ai.usage.total_tokens", totalTokens);
+        }
+
+        const durationMs =
+          typeof event?.durationMs === "number"
+            ? event.durationMs
+            : sessionCtx?.llmStartTime
+              ? Date.now() - sessionCtx.llmStartTime
+              : undefined;
+        if (typeof durationMs === "number") {
+          llmSpan.setAttribute("openclaw.llm.duration_ms", durationMs);
+        }
+
+        const errorMsg = event?.error;
+        if (errorMsg) {
+          const errStr = String(errorMsg).slice(0, 500);
+          llmSpan.setAttribute(ERROR_TYPE, "llm_error");
+          llmSpan.recordException({ name: "LlmError", message: errStr });
+          llmSpan.setStatus({ code: SpanStatusCode.ERROR, message: errStr.slice(0, 200) });
+        } else {
+          llmSpan.setStatus({ code: SpanStatusCode.OK });
+        }
+
+        llmSpan.end();
+        sessionCtx!.llmSpan = undefined;
+        sessionCtx!.llmStartTime = undefined;
+      } catch {
+        // Never let telemetry errors break the main flow
+      }
+
+      return undefined;
+    },
+    { priority: -80 }
+  );
+
+  logger.info("[otel] Registered llm_output hook (via api.on)");
+
   // ── tool_result_persist ──────────────────────────────────────────
   // Creates a child span under the agent turn span for each tool call.
   // SYNCHRONOUS — must not return a Promise.
@@ -347,6 +495,66 @@ export function registerHooks(
 
   logger.info("[otel] Registered tool_result_persist hook (via api.on)");
 
+  // ── message_sent ─────────────────────────────────────────────────
+  // Records the outbound reply as a short INTERNAL span under the root
+  // request span. Also increments the `openclaw.messages.sent` counter
+  // that the plugin already declares but has never populated.
+
+  api.on(
+    "message_sent",
+    (event: any, ctx: any) => {
+      try {
+        const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
+        const channel = event?.channel || ctx?.channel || "unknown";
+        const to = event?.to || event?.recipientId || "unknown";
+        const messageText = event?.text || event?.message || "";
+        const charCount =
+          typeof messageText === "string" ? messageText.length : 0;
+
+        const sessionCtx = sessionContextMap.get(sessionKey);
+        const parentContext =
+          sessionCtx?.rootContext || sessionCtx?.agentContext || context.active();
+
+        const span = tracer.startSpan(
+          "openclaw.message.sent",
+          {
+            kind: SpanKind.INTERNAL,
+            attributes: {
+              // openclaw legacy
+              "openclaw.message.channel": channel,
+              "openclaw.session.key": sessionKey,
+              "openclaw.message.direction": "outbound",
+              "openclaw.message.to": to,
+              "openclaw.message.chars": charCount,
+              // GenAI conversation correlation
+              [GEN_AI_CONVERSATION_ID]: sessionKey,
+              // code.*
+              [CODE_FUNCTION]: "message_sent",
+              [CODE_NAMESPACE]: CODE_NS,
+            },
+          },
+          parentContext
+        );
+
+        counters.messagesSent.add(1, {
+          "openclaw.message.channel": channel,
+        });
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        span.end();
+
+        logger.debug?.(`[otel] Outbound message span recorded: session=${sessionKey}, channel=${channel}, chars=${charCount}`);
+      } catch {
+        // Never let telemetry errors break the main flow
+      }
+
+      return undefined;
+    },
+    { priority: -90 }
+  );
+
+  logger.info("[otel] Registered message_sent hook (via api.on)");
+
   // ── agent_end ────────────────────────────────────────────────────
   // Ends the agent turn span AND the root request span.
   // Event shape from OpenClaw:
@@ -412,6 +620,21 @@ export function registerHooks(
         logger.debug?.(`[otel] agent_end tokens: input=${totalInputTokens}, output=${totalOutputTokens}, cache_read=${cacheReadTokens}, cache_write=${cacheWriteTokens}, model=${model}`);
 
         const sessionCtx = sessionContextMap.get(sessionKey);
+
+        // Safety net: close any leftover in-flight LLM span so it
+        // doesn't leak past the agent turn (e.g., when llm_output
+        // never fires due to provider error).
+        if (sessionCtx?.llmSpan) {
+          try {
+            sessionCtx.llmSpan.setStatus({
+              code: SpanStatusCode.ERROR,
+              message: "llm_output did not fire before agent_end",
+            });
+            sessionCtx.llmSpan.end();
+          } catch { /* ignore */ }
+          sessionCtx.llmSpan = undefined;
+          sessionCtx.llmStartTime = undefined;
+        }
 
         // End the agent turn span
         if (sessionCtx?.agentSpan) {
@@ -608,6 +831,7 @@ export function registerHooks(
     for (const [key, ctx] of sessionContextMap) {
       if (now - ctx.startTime > maxAge) {
         try {
+          ctx.llmSpan?.end();
           ctx.agentSpan?.end();
           if (ctx.rootSpan !== ctx.agentSpan) ctx.rootSpan?.end();
         } catch { /* ignore */ }
