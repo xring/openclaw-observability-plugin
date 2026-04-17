@@ -301,8 +301,29 @@ For **defense in depth**, add [Tetragon](https://tetragon.io) eBPF-based monitor
 - **Sensitive file detection**: Alert when `.env`, SSH keys, or credentials are accessed
 - **Dangerous command detection**: Catch `rm`, `curl | sh`, `chmod 777`, etc.
 - **Privilege escalation**: Detect `setuid`/`setgid` attempts
+- **Supply chain defense**: Monitor npm/pip installs for malicious packages
+- **Persistence detection**: Catch HEARTBEAT.md/SOUL.md tampering
+- **Network exfiltration**: Detect DNS/HTTP data exfiltration attempts
+- **Obfuscation detection**: Flag base64/encoding tool usage
+- **Git credential protection**: Monitor git operations and credential access
 
-### Quick Setup
+### TracingPolicy Coverage (11 Policies)
+
+| # | Policy | Threat | References |
+|---|--------|--------|------------|
+| 01 | `process-exec` | All process execution | General visibility |
+| 02 | `sensitive-files` | Credential/file theft | SSH, AWS, Kube configs |
+| 04 | `privilege-escalation` | Root access attempts | setuid/setgid/sudo |
+| 05 | `dangerous-commands` | Destructive/exfil commands | rm, curl, nc, xmrig |
+| 06 | `kernel-modules` | Rootkit loading | init_module, insmod |
+| 07 | `prompt-injection-shell` | Injected shell commands | curl\|bash, reverse shells |
+| 08 | `network-exfiltration` | DNS/HTTP data exfil | CVE-2025-55284, Agent Commander C2 |
+| 09 | `supply-chain` | Malicious packages | LiteLLM 1.82.8, Trivy compromise |
+| 10 | `persistence-tampering` | Config/memory tampering | HEARTBEAT.md backdoor, Skill overwrite |
+| 11 | `obfuscation-encoding` | Encoded payloads | Unicode steganography, base64 |
+| 12 | `git-operations` | Git credential theft | Force push, .git-credentials |
+
+Policies are in [`tetragon-policies/`](./tetragon-policies/) with install instructions.
 
 ```bash
 # Install Tetragon
