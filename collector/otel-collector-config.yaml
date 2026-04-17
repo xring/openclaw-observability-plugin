@@ -9,12 +9,12 @@
 # - DT_ENDPOINT: Your OTLP endpoint (e.g., https://xxx.live.dynatrace.com/api/v2/otlp)
 # - DT_API_TOKEN: Your API token with otlp ingest scope
 #
-# For other backends, replace the otlphttp/dynatrace exporter with your backend config.
+# For other backends, replace otlphttp/dynatrace exporter with your backend config.
 
 receivers:
-  # ─────────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────
   # OTLP Receiver - receives traces, metrics, logs from OpenClaw plugin
-  # ─────────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────
   otlp:
     protocols:
       grpc:
@@ -22,9 +22,9 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
 
-  # ─────────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────
   # Host Metrics - optional system metrics (CPU, memory, disk, network)
-  # ─────────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────
   hostmetrics:
     collection_interval: 30s
     scrapers:
@@ -34,9 +34,9 @@ receivers:
       load:
       network:
 
-  # ─────────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────
   # OpenClaw Gateway Logs - application logs from the gateway
-  # ─────────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────
   filelog/openclaw:
     include:
       - /tmp/openclaw/openclaw-*.log
@@ -49,7 +49,7 @@ receivers:
         parse_from: body
         timestamp:
           parse_from: attributes.time
-          layout: '%Y-%m-%dT%H:%M:%S.%LZ'
+          layout: '%Y-%m-%dT%H:%M:%S.%L%z'
       # Extract log level
       - type: severity_parser
         parse_from: attributes._meta.logLevelName
@@ -73,15 +73,10 @@ receivers:
         from: attributes._meta.path.fileLine
         to: attributes.code.lineno
         if: attributes._meta.path != nil
-      - type: move
-        from: attributes._meta.path.method
-        to: attributes.code.function
-        if: attributes._meta.path != nil
 
-  # ─────────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────
   # Tetragon Security Events - kernel-level security monitoring
-  # Requires Tetragon installed with TracingPolicies from tetragon-policies/
-  # ─────────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────
   filelog/tetragon:
     include:
       - /var/log/tetragon/tetragon.log
@@ -93,40 +88,43 @@ receivers:
         parse_from: body
         timestamp:
           parse_from: attributes.time
-          layout: '%Y-%m-%dT%H:%M:%S.%LZ'
+          layout: '%Y-%m-%dT%H:%M:%S.%L%z'
 
 processors:
   # ─────────────────────────────────────────────────────────────────────────────
-  # Resource Detection - adds host.name, os.type
-  # ─────────────────────────────────────────────────────────────────────────────
-  resourcedetection/system:
-    detectors: ["system"]
-    system:
-      hostname_sources: ["os"]
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Cumulative to Delta - Dynatrace requires delta temporality for counters
-  # ─────────────────────────────────────────────────────────────────────────────
-  cumulativetodelta:
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Batching - improves export efficiency
-  # ─────────────────────────────────────────────────────────────────────────────
-  batch:
-    timeout: 10s
-    send_batch_size: 512
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Resource attributes for OpenClaw telemetry
-  # ─────────────────────────────────────────────────────────────────────────────
+  # Resource processor to set OpenClaw resource attributes
+  # ─────────────────────────────────────────────────────────────────────
   resource/openclaw:
     attributes:
+      - key: host.name
+        value: "openclaw"
+        action: upsert
       - key: service.name
         value: "openclaw-gateway"
         action: upsert
       - key: deployment.environment
         value: "production"
         action: upsert
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Resource Detection - adds host.name, os.type (AFTER resource/openclaw)
+  # ─────────────────────────────────────────────────────────────────────
+  resourcedetection/system:
+    detectors: ["system"]
+    system:
+      hostname_sources: ["os"]
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Cumulative to Delta - Dynatrace requires delta temporality for counters
+  # ─────────────────────────────────────────────────────────────────────
+  cumulativetodelta:
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Batching - improves export efficiency
+  # ─────────────────────────────────────────────────────────────────────
+  batch:
+    timeout: 200ms
+    send_batch_size: 512
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Transform Tetragon events - extract fields and assign risk levels
@@ -167,11 +165,6 @@ processors:
   # ─────────────────────────────────────────────────────────────────────────────
   # Resource attributes for Tetragon security events
   # ─────────────────────────────────────────────────────────────────────────────
-  filter:
-        error_mode: ignore
-        metrics:
-          metric:
-            - 'type == METRIC_DATA_TYPE_SUMMARY'
   resource/tetragon:
     attributes:
       - key: service.name
@@ -180,14 +173,14 @@ processors:
       - key: tetragon.version
         value: "1.6.0"
         action: upsert
-      - key: security.source
+      - key: service.version
         value: "tetragon"
         action: upsert
 
 exporters:
   # ─────────────────────────────────────────────────────────────────────────────
   # Dynatrace Exporter - replace with your backend
-  # ─────────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────
   otlphttp/dynatrace:
     endpoint: "${env:DT_ENDPOINT}"
     headers:
@@ -195,7 +188,7 @@ exporters:
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Debug Exporter - logs telemetry to stdout (useful for testing)
-  # ─────────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────
   debug:
     verbosity: basic
 
@@ -203,7 +196,7 @@ service:
   telemetry:
     metrics:
       level: none  # Disable collector's own metrics
-      
+
   pipelines:
     # ── OpenClaw Application Traces ──
     traces:
@@ -214,7 +207,7 @@ service:
     # ── OpenClaw + Host Metrics ──
     metrics:
       receivers: [otlp, hostmetrics]
-      processors: [resourcedetection/system, resource/openclaw,filter, cumulativetodelta, batch]
+      processors: [cumulativetodelta, resource/openclaw, batch]
       exporters: [otlphttp/dynatrace, debug]
 
     # ── OpenClaw Application Logs (OTLP + filelog) ──
@@ -228,3 +221,5 @@ service:
       receivers: [filelog/tetragon]
       processors: [transform/tetragon, resource/tetragon, resourcedetection/system, batch]
       exporters: [otlphttp/dynatrace, debug]
+
+

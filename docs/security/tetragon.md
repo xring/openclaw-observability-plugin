@@ -341,6 +341,256 @@ sudo chmod 644 /var/log/tetragon/tetragon.log
 sudo usermod -a -G adm otelcol-contrib
 ```
 
+### 8. Network Exfiltration Detection (2025-2026)
+
+Detects DNS/HTTP data exfiltration and C2 callbacks from agent processes.
+
+**Threat references:**
+- Claude Code DNS exfiltration (CVE-2025-55284)
+- Agent Commander promptware C2 (embracethered, March 2026)
+- Data exfiltration via image rendering (Amp Code, August 2025)
+
+```yaml
+# /etc/tetragon/tetragon.tp.d/openclaw/08-network-exfiltration.yaml
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: openclaw-network-exfiltration
+spec:
+  kprobes:
+    - call: "tcp_connect"
+      syscall: false
+      args:
+        - index: 0
+          type: "sockaddr"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchActions:
+            - action: Post
+    - call: "dns_query"
+      syscall: false
+      args:
+        - index: 1
+          type: "string"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchActions:
+            - action: Post
+```
+
+### 9. Supply Chain Attack Detection
+
+Monitors package manager invocations from agent processes.
+
+**Threat references:**
+- LiteLLM 1.82.8 credential stealer in `.pth` file (March 2026)
+- Trivy CI compromise leading to PyPI package poisoning
+- Typosquatting attacks in agent-installed packages
+
+```yaml
+# /etc/tetragon/tetragon.tp.d/openclaw/09-supply-chain.yaml
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: openclaw-supply-chain
+spec:
+  kprobes:
+    - call: "sys_execve"
+      syscall: true
+      args:
+        - index: 0
+          type: "string"
+        - index: 1
+          type: "string"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchArgs:
+            - index: 0
+              operator: "In"
+              values:
+                - "/usr/bin/npm"
+                - "/usr/bin/pip"
+                - "/usr/bin/pip3"
+                - "/usr/bin/npx"
+                - "/usr/bin/yarn"
+                - "/usr/bin/pnpm"
+          matchActions:
+            - action: Post
+```
+
+### 10. Persistence & Configuration Tampering
+
+Detects writes to OpenClaw memory, identity, and configuration files.
+
+**Threat references:**
+- Agent Commander persistence via HEARTBEAT.md backdoor (embracethered, March 2026)
+- Cross-agent skill overwrite attacks (embracethered, September 2025)
+- SOUL.md / IDENTITY.md manipulation for persistent control
+
+```yaml
+# /etc/tetragon/tetragon.tp.d/openclaw/10-persistence-tampering.yaml
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: openclaw-persistence-tampering
+spec:
+  kprobes:
+    - call: "security_file_open"
+      syscall: false
+      args:
+        - index: 0
+          type: "file"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchArgs:
+            - index: 0
+              operator: "In"
+              values:
+                - "HEARTBEAT.md"
+                - "SOUL.md"
+                - "MEMORY.md"
+                - "IDENTITY.md"
+                - "AGENTS.md"
+                - "openclaw.json"
+                - "SKILL.md"
+          matchActions:
+            - action: Post
+    - call: "sys_execve"
+      syscall: true
+      args:
+        - index: 0
+          type: "string"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchArgs:
+            - index: 0
+              operator: "In"
+              values:
+                - "/usr/bin/crontab"
+                - "/usr/bin/at"
+                - "/usr/bin/systemctl"
+          matchActions:
+            - action: Post
+```
+
+### 11. Obfuscation & Encoding Detection
+
+Detects tools commonly used to encode/decode malicious payloads.
+
+**Threat references:**
+- Hidden Unicode tag codepoints in Skills (embracethered, February 2026)
+- Base64-encoded prompt injection payloads
+- Steganographic instructions in images and files
+
+```yaml
+# /etc/tetragon/tetragon.tp.d/openclaw/11-obfuscation-encoding.yaml
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: openclaw-obfuscation-encoding
+spec:
+  kprobes:
+    - call: "sys_execve"
+      syscall: true
+      args:
+        - index: 0
+          type: "string"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchArgs:
+            - index: 0
+              operator: "In"
+              values:
+                - "/usr/bin/base64"
+                - "/usr/bin/xxd"
+                - "/usr/bin/python3"
+                - "/usr/bin/perl"
+                - "/usr/bin/openssl"
+          matchActions:
+            - action: Post
+```
+
+### 12. Git Operations Monitoring
+
+Monitors git commands and access to credential files.
+
+**Threat references:**
+- Git credential theft via `.git-credentials` access
+- Force pushing to main branch (Claude Code auto-mode attack)
+- Secret leakage through git push
+
+```yaml
+# /etc/tetragon/tetragon.tp.d/openclaw/12-git-operations.yaml
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: openclaw-git-operations
+spec:
+  kprobes:
+    - call: "sys_execve"
+      syscall: true
+      args:
+        - index: 0
+          type: "string"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchArgs:
+            - index: 0
+              operator: "In"
+              values:
+                - "/usr/bin/git"
+          matchActions:
+            - action: Post
+    - call: "security_file_open"
+      syscall: false
+      args:
+        - index: 0
+          type: "file"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchArgs:
+            - index: 0
+              operator: "In"
+              values:
+                - ".git-credentials"
+                - ".gitconfig"
+                - ".netrc"
+          matchActions:
+            - action: Post
+```
+
 ## Event Examples
 
 ### Process Execution Event
@@ -396,8 +646,13 @@ In your observability backend (Dynatrace, Grafana, etc.), create alerts for:
 |-------|-----------|----------|
 | Privilege Escalation | `tetragon.policy == "openclaw-privilege-escalation"` | Critical |
 | Kernel Module Load | `tetragon.policy == "openclaw-kernel-modules"` | Critical |
+| Persistence Tampering | `tetragon.policy == "openclaw-persistence-tampering"` | Critical |
+| Supply Chain Install | `tetragon.policy == "openclaw-supply-chain"` | Critical |
 | Sensitive File Access | `tetragon.policy == "openclaw-sensitive-files"` | High |
 | Dangerous Command | `tetragon.policy == "openclaw-dangerous-commands"` | High |
+| Network Exfiltration | `tetragon.policy == "openclaw-network-exfiltration"` | High |
+| Git Credential Access | `tetragon.policy == "openclaw-git-operations"` | High |
+| Obfuscation/Encoding | `tetragon.policy == "openclaw-obfuscation-encoding"` | Medium |
 | Unusual Process Exec | `tetragon.policy == "openclaw-process-exec"` AND off-hours | Medium |
 
 ## Complete Observability Stack
