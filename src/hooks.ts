@@ -141,7 +141,7 @@ export function registerHooks(
 
         // Optionally capture inbound message content
         if (config.captureContent && messageText) {
-          rootSpan.setAttribute("gen_ai.prompt", messageText.slice(0, 10000));
+          rootSpan.setAttribute("gen_ai.prompt", messageText.slice(0, 1000));
         }
 
         // Store the context so child spans can reference it
@@ -371,7 +371,7 @@ export function registerHooks(
           llmSpan.setAttribute("openclaw.llm.duration_ms", durationMs);
         }
 
-        // Optionally capture LLM completion content
+        // Optionally capture
         if (config.captureContent) {
           const completionContent = event?.completion || event?.content || event?.text;
           if (completionContent) {
