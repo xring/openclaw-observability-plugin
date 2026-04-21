@@ -294,6 +294,7 @@ export function registerHooks(
           console.log(`[otel] Capturing LLM prompt content for event=${event} event_type=${typeof event}`, event)
           logger.info(`[otel] xxxxxxx Capturing LLM prompt content for event=${event} event_type=${typeof event} stringify=${JSON.stringify(event)}`, event)
           const promptContent = event?.messages || event?.prompt || event?.content;
+          console.log(`[otel] xxxxxxx Capturing LLM prompt content for prompt=${promptContent} prompt_type=${typeof promptContent}`, promptContent)
           if (promptContent) {
             const promptStr = typeof promptContent === "string"
               ? promptContent
