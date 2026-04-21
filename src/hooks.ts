@@ -714,7 +714,9 @@ export function registerHooks(
               if (msg?.role === "assistant" && msg?.content) {
                 const contents = msg.content;
                 for (const content of contents) {
+                  logger.info(`[otel] Capturing assistant content for content`, JSON.stringify(content))
                    if (content?.type === "text") {
+                    logger.info(`[otel] [DEBUG llm_output] Capturing assistant content for text`, content.text)
                      const text = content.text;
                      agentSpan.setAttribute("gen_ai.completion", text.slice(0, 1000));
                       break;
