@@ -293,7 +293,7 @@ export function registerHooks(
             const promptStr = typeof promptContent === "string"
               ? promptContent
               : JSON.stringify(promptContent);
-            llmSpan.setAttribute("gen_ai.prompt", promptStr.slice(0, 10000));
+            llmSpan.setAttribute("gen_ai.prompt", promptStr.slice(0, 1000));
           }
         }
 
@@ -371,7 +371,7 @@ export function registerHooks(
           llmSpan.setAttribute("openclaw.llm.duration_ms", durationMs);
         }
 
-        // Optionally capture
+        // Optionally captureLLM completion content
         if (config.captureContent) {
           const completionContent = event?.completion || event?.content || event?.text;
           if (completionContent) {
@@ -535,6 +535,9 @@ export function registerHooks(
         const channel = event?.channel || ctx?.channel || "unknown";
         const to = event?.to || event?.recipientId || "unknown";
         const messageText = event?.text || event?.message || "";
+
+        logger.info(`[otel] Outbound message: session=${sessionKey}, channel=${channel}, to=${to}, text=${messageText}, text_type=${typeof messageText}`);
+
         const charCount =
           typeof messageText === "string" ? messageText.length : 0;
 
