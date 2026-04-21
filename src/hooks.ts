@@ -291,15 +291,10 @@ export function registerHooks(
 
         // Optionally capture LLM prompt content
         if (config.captureContent) {
-          console.log(`[otel] Capturing LLM prompt content for event=${event} event_type=${typeof event}`, event)
-          logger.info(`[otel] xxxxxxx Capturing LLM prompt content for event=${event} event_type=${typeof event} stringify=${JSON.stringify(event)}`, event)
           const promptContent = event?.messages || event?.prompt || event?.content;
-          console.log(`[otel] yyyyyyy Capturing LLM prompt content for prompt=${promptContent} prompt_type=${typeof promptContent}`, promptContent)
-          logger.info(`[otel] yyyyyyy Capturing LLM prompt content for prompt=${promptContent} prompt_type=${typeof promptContent}`, promptContent)
           if (promptContent) {
-            const promptStr = typeof promptContent === "string"
-              ? promptContent
-              : JSON.stringify(promptContent);
+            const promptStr = promptContent.slice(promptContent.indexOf(']') + 2);
+            logger.info(`[otel] [DEBUG user_input] Capturing LLM prompt content for prompt=${promptStr}`)
             llmSpan.setAttribute("gen_ai.prompt", promptStr.slice(0, 1000));
           }
         }
@@ -716,11 +711,11 @@ export function registerHooks(
           if (config.captureContent) {
             for (const msg of messages) {
               if (msg?.role === "assistant" && msg?.content) {
-                console.log(`[otel] Capturing assistant content for msg`, msg)
-                logger.info(`[otel] Capturing assistant content for msg`, msg)
                 const content = typeof msg.content === "string"
                   ? msg.content
                   : JSON.stringify(msg.content);
+                console.log(`[otel] [DEBUG assistant_content] Capturing assistant content for msg`, msg)
+                logger.info(`[otel] [DEBUG assistant_content] Capturing assistant content for msg`, msg)
                 agentSpan.setAttribute("gen_ai.completion", content.slice(0, 1000));
                 break;
               }
