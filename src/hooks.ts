@@ -139,6 +139,11 @@ export function registerHooks(
           }
         }
 
+        // Optionally capture inbound message content
+        if (config.captureContent && messageText) {
+          rootSpan.setAttribute("gen_ai.prompt", messageText.slice(0, 10000));
+        }
+
         // Store the context so child spans can reference it
         const rootContext = trace.setSpan(context.active(), rootSpan);
 
@@ -281,6 +286,17 @@ export function registerHooks(
           parentContext
         );
 
+        // Optionally capture LLM prompt content
+        if (config.captureContent) {
+          const promptContent = event?.messages || event?.prompt || event?.content;
+          if (promptContent) {
+            const promptStr = typeof promptContent === "string"
+              ? promptContent
+              : JSON.stringify(promptContent);
+            llmSpan.setAttribute("gen_ai.prompt", promptStr.slice(0, 10000));
+          }
+        }
+
         if (sessionCtx) {
           sessionCtx.llmSpan = llmSpan;
           sessionCtx.llmStartTime = Date.now();
@@ -353,6 +369,17 @@ export function registerHooks(
               : undefined;
         if (typeof durationMs === "number") {
           llmSpan.setAttribute("openclaw.llm.duration_ms", durationMs);
+        }
+
+        // Optionally capture LLM completion content
+        if (config.captureContent) {
+          const completionContent = event?.completion || event?.content || event?.text;
+          if (completionContent) {
+            const compStr = typeof completionContent === "string"
+              ? completionContent
+              : JSON.stringify(completionContent);
+            llmSpan.setAttribute("gen_ai.completion", compStr.slice(0, 10000));
+          }
         }
 
         const errorMsg = event?.error;
@@ -540,6 +567,11 @@ export function registerHooks(
           "openclaw.message.channel": channel,
         });
 
+        // Optionally capture outbound reply content
+        if (config.captureContent && messageText) {
+          span.setAttribute("gen_ai.completion", messageText.slice(0, 10000));
+        }
+
         span.setStatus({ code: SpanStatusCode.OK });
         span.end();
 
@@ -663,6 +695,19 @@ export function registerHooks(
 
           if (typeof durationMs === "number") {
             agentSpan.setAttribute("openclaw.agent.duration_ms", durationMs);
+          }
+
+          // Optionally capture assistant completion from messages
+          if (config.captureContent) {
+            for (const msg of messages) {
+              if (msg?.role === "assistant" && msg?.content) {
+                const content = typeof msg.content === "string"
+                  ? msg.content
+                  : JSON.stringify(msg.content);
+                agentSpan.setAttribute("gen_ai.completion", content.slice(0, 10000));
+                break;
+              }
+            }
           }
 
           // Token usage — GenAI semantic convention attributes
