@@ -126,6 +126,9 @@ export function registerHooks(
           },
         });
 
+        console.log(`[otel] Inbound message: session=${sessionKey}, channel=${channel}, from=${from}, text=${messageText}, text_type=${typeof messageText}`);
+        logger.info(`[otel] Inbound message: session=${sessionKey}, channel=${channel}, from=${from}, text=${messageText}, text_type=${typeof messageText}`);
+
         // ═══ SECURITY DETECTION 2: Prompt Injection ═══════════════
         if (messageText && typeof messageText === "string" && messageText.length > 0) {
           const securityEvent = checkMessageSecurity(
@@ -288,6 +291,8 @@ export function registerHooks(
 
         // Optionally capture LLM prompt content
         if (config.captureContent) {
+          console.log(`[otel] Capturing LLM prompt content for event=${event} event_type=${typeof event}`, event)
+          logger.info(`[otel] Capturing LLM prompt content for event=${event} event_type=${typeof event}`, event)
           const promptContent = event?.messages || event?.prompt || event?.content;
           if (promptContent) {
             const promptStr = typeof promptContent === "string"
@@ -371,8 +376,12 @@ export function registerHooks(
           llmSpan.setAttribute("openclaw.llm.duration_ms", durationMs);
         }
 
+        
+
         // Optionally captureLLM completion content
         if (config.captureContent) {
+          console.log(`[otel] Capturing LLM completion content for event=${event} event_type=${typeof event}`, event)
+          logger.info(`[otel] Capturing LLM completion content for event=${event} event_type=${typeof event}`, event)
           const completionContent = event?.completion || event?.content || event?.text;
           if (completionContent) {
             const compStr = typeof completionContent === "string"
@@ -536,6 +545,7 @@ export function registerHooks(
         const to = event?.to || event?.recipientId || "unknown";
         const messageText = event?.text || event?.message || "";
 
+        console.log(`[otel] Outbound message: session=${sessionKey}, channel=${channel}, to=${to}, text=${messageText}, text_type=${typeof messageText}`);
         logger.info(`[otel] Outbound message: session=${sessionKey}, channel=${channel}, to=${to}, text=${messageText}, text_type=${typeof messageText}`);
 
         const charCount =
@@ -704,10 +714,12 @@ export function registerHooks(
           if (config.captureContent) {
             for (const msg of messages) {
               if (msg?.role === "assistant" && msg?.content) {
+                console.log(`[otel] Capturing assistant content for msg`, msg)
+                logger.info(`[otel] Capturing assistant content for msg`, msg)
                 const content = typeof msg.content === "string"
                   ? msg.content
                   : JSON.stringify(msg.content);
-                agentSpan.setAttribute("gen_ai.completion", content.slice(0, 10000));
+                agentSpan.setAttribute("gen_ai.completion", content.slice(0, 1000));
                 break;
               }
             }
