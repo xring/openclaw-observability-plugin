@@ -709,15 +709,17 @@ export function registerHooks(
 
           // Optionally capture assistant completion from messages
           if (config.captureContent) {
+            // Array of content objects, include thinking
             for (const msg of messages) {
               if (msg?.role === "assistant" && msg?.content) {
-                const content = typeof msg.content === "string"
-                  ? msg.content
-                  : JSON.stringify(msg.content);
-                console.log(`[otel] [DEBUG assistant_content] Capturing assistant content for msg`, msg)
-                logger.info(`[otel] [DEBUG assistant_content] Capturing assistant content for msg`, msg)
-                agentSpan.setAttribute("gen_ai.completion", content.slice(0, 1000));
-                break;
+                const contents = msg.content;
+                for (const content of contents) {
+                   if (content?.type === "text") {
+                     const text = content.text;
+                     agentSpan.setAttribute("gen_ai.completion", text.slice(0, 1000));
+                      break;
+                   }
+                }
               }
             }
           }
