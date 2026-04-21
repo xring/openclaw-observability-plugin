@@ -289,13 +289,13 @@ export function registerHooks(
           parentContext
         );
 
-        // Optionally capture LLM prompt content
+        // Optionally capture LLM prompt content [DONE]
         if (config.captureContent) {
           const promptContent = event?.messages || event?.prompt || event?.content;
           if (promptContent) {
             const promptStr = promptContent.slice(promptContent.indexOf(']') + 2);
             logger.info(`[otel] [DEBUG user_input] Capturing LLM prompt content for prompt=${promptStr}`)
-            llmSpan.setAttribute("gen_ai.prompt", promptStr.slice(0, 1000));
+            llmSpan.setAttribute("gen_ai.prompt", JSON.stringify(promptStr.slice(0, 1000)));
           }
         }
 
@@ -707,18 +707,17 @@ export function registerHooks(
             agentSpan.setAttribute("openclaw.agent.duration_ms", durationMs);
           }
 
-          // Optionally capture assistant completion from messages
+          // Optionally capture assistant completion from messages [DONE]
           if (config.captureContent) {
             // Array of content objects, include thinking
             for (const msg of messages) {
               if (msg?.role === "assistant" && msg?.content) {
                 const contents = msg.content;
                 for (const content of contents) {
-                  logger.info(`[otel] Capturing assistant content for content`, JSON.stringify(content))
                    if (content?.type === "text") {
-                    logger.info(`[otel] [DEBUG llm_output] Capturing assistant content for text`, content.text)
+                    logger.info(`[otel] [DEBUG llm_output] Capturing assistant content for text=${content.text}`)
                      const text = content.text;
-                     agentSpan.setAttribute("gen_ai.completion", text.slice(0, 1000));
+                     agentSpan.setAttribute("gen_ai.completion", JSON.stringify(text.slice(0, 1000)));
                       break;
                    }
                 }
