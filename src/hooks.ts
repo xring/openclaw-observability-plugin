@@ -289,7 +289,7 @@ export function registerHooks(
           parentContext
         );
 
-        // Optionally capture LLM prompt content [DONE]
+        // Optionally capture LLM prompt content [DONE] --- SpanName openclaw.llm.call
         if (config.captureContent) {
           const promptContent = event?.messages || event?.prompt || event?.content;
           if (promptContent) {
@@ -707,7 +707,7 @@ export function registerHooks(
             agentSpan.setAttribute("openclaw.agent.duration_ms", durationMs);
           }
 
-          // Optionally capture assistant completion from messages [DONE]
+          // Optionally capture assistant completion from messages [DONE] SpanName -- openclaw.agent.turn
           if (config.captureContent) {
             // Array of content objects, include thinking
             for (const msg of messages) {
