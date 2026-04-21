@@ -292,7 +292,7 @@ export function registerHooks(
         // Optionally capture LLM prompt content
         if (config.captureContent) {
           console.log(`[otel] Capturing LLM prompt content for event=${event} event_type=${typeof event}`, event)
-          logger.info(`[otel] Capturing LLM prompt content for event=${event} event_type=${typeof event}`, event)
+          logger.info(`[otel] xxxxxxx Capturing LLM prompt content for event=${event} event_type=${typeof event} stringify=${JSON.stringify(event)}`, event)
           const promptContent = event?.messages || event?.prompt || event?.content;
           if (promptContent) {
             const promptStr = typeof promptContent === "string"
