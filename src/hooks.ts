@@ -294,7 +294,7 @@ export function registerHooks(
           const promptContent = event?.messages || event?.prompt || event?.content;
           if (promptContent) {
             const promptStr = promptContent.slice(promptContent.indexOf(']') + 2);
-            logger.info(`[otel] [DEBUG user_input] Capturing LLM prompt content for prompt=${promptStr}`)
+            // logger.info(`[otel] [DEBUG user_input] Capturing LLM prompt content for prompt=${promptStr}`)
             llmSpan.setAttribute("gen_ai.prompt", JSON.stringify(promptStr.slice(0, 1000)));
           }
         }
@@ -377,8 +377,8 @@ export function registerHooks(
 
         // Optionally captureLLM completion content
         if (config.captureContent) {
-          console.log(`[otel] Capturing LLM completion content for event=${event} event_type=${typeof event}`, event)
-          logger.info(`[otel] Capturing LLM completion content for event=${event} event_type=${typeof event}`, event)
+          // console.log(`[otel] Capturing LLM completion content for event=${event} event_type=${typeof event}`, event)
+          // logger.info(`[otel] Capturing LLM completion content for event=${event} event_type=${typeof event}`, event)
           const completionContent = event?.completion || event?.content || event?.text;
           if (completionContent) {
             const compStr = typeof completionContent === "string"
@@ -715,9 +715,9 @@ export function registerHooks(
                 const contents = msg.content;
                 for (const content of contents) {
                    if (content?.type === "text") {
-                    logger.info(`[otel] [DEBUG llm_output] Capturing assistant content for text=${content.text}`)
-                     const text = content.text;
-                     agentSpan.setAttribute("gen_ai.completion", JSON.stringify(text.slice(0, 1000)));
+                      // logger.info(`[otel] [DEBUG llm_output] Capturing assistant content for text=${content.text}`)
+                      const text = content.text;
+                      agentSpan.setAttribute("gen_ai.completion", JSON.stringify(text.slice(0, 1000)));
                       break;
                    }
                 }
