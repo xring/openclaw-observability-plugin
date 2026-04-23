@@ -106,7 +106,8 @@ You should see these lines **during `register()`** (before the gateway accepts t
 
 ```
 [otel] Registered message_received hook (via api.on)
-[otel] Registered before_agent_start hook (via api.on)
+[otel] Registered before_model_resolve hook (via api.on)
+[otel] Registered before_prompt_build hook (via api.on)
 [otel] Registered tool_result_persist hook (via api.on)
 [otel] Registered agent_end hook (via api.on)
 [otel] Registered command event hooks (via api.registerHook)

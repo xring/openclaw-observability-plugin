@@ -12,10 +12,20 @@
  *   └── (future: message.sent span)
  *
  * Context propagation:
- *   - message_received: creates root span, stores in sessionContextMap
- *   - before_agent_start: creates child "agent turn" span under root
- *   - tool_result_persist: creates child tool span under agent turn
- *   - agent_end: ends the agent turn span
+ *   - message_received:     creates root span, stores in sessionContextMap
+ *   - before_model_resolve: creates child "agent turn" span under root
+ *                           (fires earliest in the agent run, model not yet
+ *                           resolved — model attrs are populated later)
+ *   - before_prompt_build:  enriches the agent turn span with prompt length
+ *                           and session history size once messages are loaded
+ *   - tool_result_persist:  creates child tool span under agent turn
+ *   - agent_end:            ends the agent turn + root spans
+ *
+ * Hook migration note (ISI-730):
+ *   OpenClaw 2026.2+ treats `before_agent_start` as a legacy compatibility
+ *   hook and recommends `before_model_resolve` / `before_prompt_build` for
+ *   new work. This plugin is fully migrated — it no longer registers
+ *   `before_agent_start`. Minimum OpenClaw runtime is therefore 2026.2.x.
  *
  * IMPORTANT: OpenClaw has TWO hook registration systems:
  *   - api.registerHook() → event-stream hooks (command:new, gateway:startup)
@@ -163,16 +173,23 @@ export function registerHooks(
 
   logger.info("[otel] Registered message_received hook (via api.on)");
 
-  // ── before_agent_start ───────────────────────────────────────────
+  // ── before_model_resolve ─────────────────────────────────────────
   // Creates an "agent turn" child span under the root request span.
+  //
+  // Fires EARLIEST in the agent run, before provider/model resolution
+  // (OpenClaw 2026.2+). The resolved model is NOT known at this point —
+  // it is populated later from diagnostic events or at agent_end
+  // (as gen_ai.response.model).
+  //
+  // Replaces the legacy `before_agent_start` registration used by
+  // earlier plugin versions. See ISI-730.
 
   api.on(
-    "before_agent_start",
-    (event: any, ctx: any) => {
+    "before_model_resolve",
+    (_event: any, ctx: any) => {
       try {
-        const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
-        const agentId = event?.agentId || ctx?.agentId || "unknown";
-        const model = event?.model || "unknown";
+        const sessionKey = ctx?.sessionKey || "unknown";
+        const agentId = ctx?.agentId || "unknown";
 
         const sessionCtx = sessionContextMap.get(sessionKey);
         const parentContext = sessionCtx?.rootContext || context.active();
@@ -190,14 +207,15 @@ export function registerHooks(
               [GEN_AI_AGENT_ID]: agentId,
               [GEN_AI_AGENT_NAME]: agentId,
               [GEN_AI_CONVERSATION_ID]: sessionKey,
-              [GEN_AI_REQUEST_MODEL]: model,
+              // NOTE: gen_ai.request.model is intentionally omitted here.
+              // The model is still being resolved. gen_ai.response.model
+              // is written at agent_end from diagnostic usage events.
               // code.*
-              [CODE_FUNCTION]: "before_agent_start",
+              [CODE_FUNCTION]: "before_model_resolve",
               [CODE_NAMESPACE]: CODE_NS,
               // openclaw legacy (preserve for dashboards)
               "openclaw.agent.id": agentId,
               "openclaw.session.key": sessionKey,
-              "openclaw.agent.model": model,
             },
           },
           parentContext
@@ -228,13 +246,50 @@ export function registerHooks(
         // Silently ignore
       }
 
-      // Return undefined — don't modify system prompt
+      // Return undefined — we do not override provider/model.
       return undefined;
     },
     { priority: 90 }
   );
 
-  logger.info("[otel] Registered before_agent_start hook (via api.on)");
+  logger.info("[otel] Registered before_model_resolve hook (via api.on)");
+
+  // ── before_prompt_build ──────────────────────────────────────────
+  // Enriches the agent turn span with prompt + session-history context
+  // once the session messages are loaded (fires after before_model_resolve
+  // but before the LLM call). Produces two attributes:
+  //   - openclaw.prompt.chars         — raw user-prompt length for this turn
+  //   - openclaw.session.message_count — history size being fed to the LLM
+  //
+  // No return value — we never rewrite systemPrompt or prependContext.
+
+  api.on(
+    "before_prompt_build",
+    (event: any, ctx: any) => {
+      try {
+        const sessionKey = ctx?.sessionKey || "unknown";
+        const sessionCtx = sessionContextMap.get(sessionKey);
+        const agentSpan = sessionCtx?.agentSpan;
+        if (!agentSpan) {
+          return undefined;
+        }
+
+        const prompt = typeof event?.prompt === "string" ? event.prompt : "";
+        const messagesArr = Array.isArray(event?.messages) ? event.messages : [];
+
+        agentSpan.setAttribute("openclaw.prompt.chars", prompt.length);
+        agentSpan.setAttribute("openclaw.session.message_count", messagesArr.length);
+      } catch {
+        // Never let telemetry errors break the main flow
+      }
+
+      // Return undefined — we do not modify system prompt / prepend context.
+      return undefined;
+    },
+    { priority: 80 }
+  );
+
+  logger.info("[otel] Registered before_prompt_build hook (via api.on)");
 
   // ── llm_input ────────────────────────────────────────────────────
   // Start a CLIENT span for the outbound LLM call. The span is the
