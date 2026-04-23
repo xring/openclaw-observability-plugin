@@ -11,6 +11,7 @@
 import { register } from 'node:module';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { resolveCaptureContent } from './capture-content.mjs';
 
 // Step 1: Register IITM as an ESM module loader hook
 // This MUST happen before any instrumented modules are imported.
@@ -28,6 +29,7 @@ const { OpenAIInstrumentation } = await import("@traceloop/instrumentation-opena
 
 const OTLP_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4318";
 const SERVICE_NAME = process.env.OTEL_SERVICE_NAME || "openclaw-gateway";
+const TRACE_CONTENT = resolveCaptureContent();
 
 const resource = resourceFromAttributes({
   "service.name": SERVICE_NAME,
@@ -43,17 +45,19 @@ const sdk = new NodeSDK({
   resource,
   spanProcessors: [new BatchSpanProcessor(traceExporter)],
   instrumentations: [
-    new AnthropicInstrumentation({ traceContent: false }),
-    new OpenAIInstrumentation({ traceContent: false }),
+    new AnthropicInstrumentation({ traceContent: TRACE_CONTENT }),
+    new OpenAIInstrumentation({ traceContent: TRACE_CONTENT }),
   ],
 });
 
 sdk.start();
 
-// Signal to the plugin that preload is active
+// Signal to the plugin that preload is active, and publish the resolved
+// traceContent state so the plugin can detect config/env mismatches.
 globalThis.__OPENCLAW_OTEL_PRELOAD_ACTIVE = true;
+globalThis.__OPENCLAW_OTEL_CAPTURE_CONTENT = TRACE_CONTENT;
 
 process.on("SIGTERM", () => sdk.shutdown());
 process.on("SIGINT", () => sdk.shutdown());
 
-console.log(`[otel-preload] GenAI instrumentation active (endpoint=${OTLP_ENDPOINT}, IITM loader registered)`);
+console.log(`[otel-preload] GenAI instrumentation active (endpoint=${OTLP_ENDPOINT}, captureContent=${TRACE_CONTENT}, IITM loader registered)`);

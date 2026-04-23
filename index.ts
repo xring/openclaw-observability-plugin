@@ -132,6 +132,23 @@ const otelObservabilityPlugin = {
         // they work in both gateway and embedded runner contexts. Only
         // gateway-specific work lives here.
 
+        // Bridge captureContent → OPENCLAW_OTEL_CAPTURE_CONTENT env var.
+        // The preload reads this env at gateway launch, but any subprocess
+        // spawned later inherits it from here too. If the preload was
+        // already active with a mismatched value, LLM-client spans will
+        // reflect the preload's value (not the plugin config) — warn so
+        // operators know to set the env var before launching the gateway.
+        const preloadActive = (globalThis as any).__OPENCLAW_OTEL_PRELOAD_ACTIVE === true;
+        const preloadResolved = (globalThis as any).__OPENCLAW_OTEL_CAPTURE_CONTENT;
+        if (preloadActive && preloadResolved !== config.captureContent) {
+          logger.warn(
+            `[otel] captureContent=${config.captureContent} in plugin config but the preload resolved OPENCLAW_OTEL_CAPTURE_CONTENT=${preloadResolved} at gateway launch. ` +
+              `Traceloop LLM-client spans will use the preload's value. ` +
+              `Set OPENCLAW_OTEL_CAPTURE_CONTENT=${config.captureContent} in the gateway's environment before starting (see docs/security/privacy.md).`
+          );
+        }
+        process.env.OPENCLAW_OTEL_CAPTURE_CONTENT = String(config.captureContent);
+
         // 1. Wrap LLM SDKs. The wraps use trace.getTracer() which goes
         //    through the provider we registered above. OpenLLMetry's
         //    IITM preload only matters in the long-running gateway
