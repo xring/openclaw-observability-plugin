@@ -232,8 +232,72 @@ OpenClaw also respects standard OTel environment variables as fallbacks:
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Default OTLP endpoint |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | Default protocol |
 | `OTEL_SERVICE_NAME` | Default service name |
+| `OPENCLAW_OTEL_CAPTURE_CONTENT` | `true` to capture LLM prompt/completion text in Traceloop spans. See [captureContent (gateway-launch setting)](#capturecontent-gateway-launch-setting). |
 
 Config file values take precedence over environment variables.
+
+## `captureContent` (gateway-launch setting)
+
+The custom plugin exposes a `captureContent` boolean in `plugins.entries.otel-observability.config`. When `true`, Traceloop-instrumented LLM-client spans (`@traceloop/instrumentation-anthropic`, `@traceloop/instrumentation-openai`) include the actual prompt/completion text as `gen_ai.prompt.*` and `gen_ai.completion.*` attributes.
+
+**Default: `false` (privacy-first).** The schema help text already advertises this toggle; see [github issue #15](https://github.com/henrikrexed/openclaw-observability-plugin/issues/15) for the motivating report.
+
+### Not hot-reloadable
+
+`captureContent` is a **gateway-launch setting**, not a hot-reloadable plugin option, because the ESM preload (`instrumentation/preload.mjs`) instantiates `AnthropicInstrumentation` and `OpenAIInstrumentation` *before* OpenClaw parses plugin config. Changing the value in `openclaw.json` mid-run has no effect until the next gateway restart.
+
+### How to enable content capture
+
+Set both the plugin config **and** the environment variable before launching the gateway:
+
+```bash
+OPENCLAW_OTEL_CAPTURE_CONTENT=true \
+  NODE_OPTIONS="--import /path/to/openclaw-observability-plugin/instrumentation/preload.mjs" \
+  openclaw gateway start
+```
+
+Or via systemd:
+
+```ini
+[Service]
+Environment=OPENCLAW_OTEL_CAPTURE_CONTENT=true
+Environment=NODE_OPTIONS=--import /path/to/openclaw-observability-plugin/instrumentation/preload.mjs
+ExecStart=/usr/bin/openclaw gateway start
+```
+
+Plugin config:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "config": {
+          "captureContent": true
+        }
+      }
+    }
+  }
+}
+```
+
+### Mismatch warning
+
+If the plugin config says `captureContent: true` but the env var was unset (or `false`) when the gateway launched, the preload will have wired the Traceloop instrumentations with `traceContent: false`. At plugin `start()` the plugin logs a warning like:
+
+```
+[otel] captureContent=true in plugin config but the preload resolved
+OPENCLAW_OTEL_CAPTURE_CONTENT=false at gateway launch. Traceloop LLM-client
+spans will use the preload's value. Set OPENCLAW_OTEL_CAPTURE_CONTENT=true
+in the gateway's environment before starting (see docs/security/privacy.md).
+```
+
+Fix by setting the env var and restarting the gateway.
+
+### Privacy guidance
+
+Leave `captureContent` at `false` unless you control the backend and understand the implications. See [Privacy: `captureContent`](./security/privacy.md) for a fuller treatment.
 
 ## Applying Changes
 

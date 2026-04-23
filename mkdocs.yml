@@ -77,6 +77,7 @@ nav:
     - Generic OTLP: backends/generic-otlp.md
   - Security:
     - Real-Time Detection: security/detection.md
+    - Privacy (captureContent): security/privacy.md
     - Kernel Monitoring with Tetragon: security/tetragon.md
   - Architecture: architecture.md
   - Limitations: limitations.md

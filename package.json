@@ -8,7 +8,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/ index.ts"
+    "lint": "eslint src/ index.ts",
+    "test": "node --test instrumentation/*.test.mjs"
   },
   "keywords": [
     "openclaw",
