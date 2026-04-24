@@ -10,7 +10,8 @@ How OpenClaw observability works — both the official plugin and custom hook-ba
 │                                                                     │
 │  ┌─────────────────────────────────────────────────────────────┐   │
 │  │                      Agent Execution                         │   │
-│  │  message_received → before_agent_start → tool_calls →       │   │
+│  │  message_received → before_model_resolve →                  │   │
+│  │                     before_prompt_build → tool_calls →       │   │
 │  │                     tool_result_persist → agent_end          │   │
 │  └──────────────────────────┬──────────────────────────────────┘   │
 │                              │                                      │
@@ -145,7 +146,7 @@ OpenClaw drives plugins through three phases. Mixing them up is the single most 
 
 | Phase | Runs | Responsibility |
 |---|---|---|
-| `register()` | Synchronous, before the gateway accepts traffic | Wire every typed hook, event-stream hook, RPC method, CLI command, background service, and agent tool. All 15 typed hooks (`message_received`, `before_agent_start`, `tool_result_persist`, `agent_end`, plus the command and gateway event hooks) land here. |
+| `register()` | Synchronous, before the gateway accepts traffic | Wire every typed hook, event-stream hook, RPC method, CLI command, background service, and agent tool. Typed hooks (`message_received`, `before_model_resolve`, `before_prompt_build`, `llm_input`, `llm_output`, `tool_result_persist`, `message_sent`, `agent_end`, plus the command and gateway event hooks) land here. |
 | `start()` | Async, once the gateway is ready | Build the OTel runtime (`initTelemetry` → TracerProvider + MeterProvider), optionally wrap LLM SDKs with OpenLLMetry when `traces` is on, and subscribe to OpenClaw diagnostic events for cost/token data. |
 | `stop()` | Async, on gateway reload or shutdown | Clear the stale-session sweeper `setInterval` (see [b668a4f](https://github.com/henrikrexed/openclaw-observability-plugin/commit/b668a4f), ISI-522), unsubscribe from diagnostics, and call `telemetry.shutdown()` so batched spans/metrics flush before the process exits. |
 
@@ -195,9 +196,14 @@ Gateway Agent Loop              Custom Plugin
      │ ─────────────────────────────>│  ──> create ROOT span
      │                               │      store in sessionContextMap
      │                               │
-     │  on("before_agent_start")     │
+     │  on("before_model_resolve")   │
      │ ─────────────────────────────>│  ──> create AGENT TURN span
      │                               │      (child of root)
+     │                               │
+     │  on("before_prompt_build")    │
+     │ ─────────────────────────────>│  ──> enrich AGENT TURN span
+     │                               │      with prompt.chars +
+     │                               │      session.message_count
      │                               │
      │  on("tool_result_persist")    │
      │ ─────────────────────────────>│  ──> create TOOL span

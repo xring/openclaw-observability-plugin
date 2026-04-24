@@ -42,7 +42,12 @@ Created by the `message_received` hook. This is the root span for the entire req
 
 ## Agent Turn Span
 
-Created by `before_agent_start`, ended by `agent_end`. Child of the request span.
+Created by the `before_model_resolve` hook at the earliest point in the agent
+run, enriched by `before_prompt_build` once session history is loaded, and
+ended by `agent_end`. Child of the request span.
+
+Prior to v0.2.0 this span was created in the legacy `before_agent_start` hook.
+See [CHANGELOG](../../CHANGELOG.md) and ISI-730 for the migration details.
 
 | Field | Value |
 |-------|-------|
@@ -55,7 +60,8 @@ Created by `before_agent_start`, ended by `agent_end`. Child of the request span
 |-----------|------|-------------|
 | `openclaw.agent.id` | string | Agent identifier |
 | `openclaw.session.key` | string | Session identifier |
-| `openclaw.agent.model` | string | Model requested |
+| `openclaw.prompt.chars` | int | Length of the user prompt (set by `before_prompt_build`) |
+| `openclaw.session.message_count` | int | Session history size fed to the LLM (set by `before_prompt_build`) |
 | `openclaw.agent.duration_ms` | int | Turn duration in milliseconds |
 | `openclaw.agent.success` | boolean | Whether the turn completed successfully |
 | `openclaw.agent.error` | string | Error message (if failed) |
@@ -63,6 +69,13 @@ Created by `before_agent_start`, ended by `agent_end`. Child of the request span
 | `gen_ai.usage.output_tokens` | int | Total output tokens |
 | `gen_ai.usage.total_tokens` | int | Sum of input + output tokens |
 | `gen_ai.response.model` | string | Actual model used (from last assistant message) |
+
+!!! note "`gen_ai.request.model` on the turn span"
+    The agent turn span no longer carries `gen_ai.request.model` — in
+    OpenClaw 2026.2+ the model has not been resolved when the span is
+    created (`before_model_resolve` fires pre-resolution). The resolved
+    model is recorded as `gen_ai.response.model` at `agent_end` and is
+    also available on `openclaw.llm.call` spans from the `llm_input` hook.
 
 !!! note "Token Counts"
     Token counts are **summed across all assistant messages** in the turn. If the agent makes multiple LLM calls (e.g., tool use loop), the totals reflect all calls combined. Cache tokens (`cacheRead`, `cacheWrite`) are included in the input token count.
@@ -121,9 +134,10 @@ Created when session commands are issued.
 The plugin maintains a `sessionContextMap` keyed by `sessionKey`:
 
 1. `message_received` creates a root span and stores its context
-2. `before_agent_start` creates an agent turn span as a child of the root
-3. `tool_result_persist` creates tool spans as children of the agent turn
-4. `agent_end` ends the agent turn and root spans, cleans up the context
+2. `before_model_resolve` creates an agent turn span as a child of the root
+3. `before_prompt_build` enriches the agent turn span with prompt/history attrs
+4. `tool_result_persist` creates tool spans as children of the agent turn
+5. `agent_end` ends the agent turn and root spans, cleans up the context
 
 Stale contexts (no `agent_end` within 5 minutes) are automatically cleaned up.
 

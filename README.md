@@ -158,7 +158,8 @@ You should see, in this order:
 
 ```
 [otel] Registered message_received hook (via api.on)
-[otel] Registered before_agent_start hook (via api.on)
+[otel] Registered before_model_resolve hook (via api.on)
+[otel] Registered before_prompt_build hook (via api.on)
 [otel] Registered tool_result_persist hook (via api.on)
 [otel] Registered agent_end hook (via api.on)
 [otel] Registered command event hooks (via api.registerHook)
@@ -168,6 +169,11 @@ You should see, in this order:
 [otel]   Traces=true Metrics=true Logs=true
 [otel]   Endpoint=http://localhost:4318 (http)
 ```
+
+> **Hook migration (v0.2.0, ISI-730).** The plugin migrated off the legacy
+> `before_agent_start` hook. The agent turn span is now started in
+> `before_model_resolve` and enriched in `before_prompt_build`. This requires
+> OpenClaw ≥ 2026.2. Pin to `0.1.x` if you need the legacy path.
 
 Then, on the next inbound message, the debug log confirms hooks are live:
 
@@ -376,10 +382,11 @@ See [Security: Tetragon](./docs/security/tetragon.md) for full installation and 
 
 **How to confirm hooks are live:**
 
-1. Check the gateway log for all six registration lines emitted from `register()`:
+1. Check the gateway log for the registration lines emitted from `register()`:
    ```
    [otel] Registered message_received hook (via api.on)
-   [otel] Registered before_agent_start hook (via api.on)
+   [otel] Registered before_model_resolve hook (via api.on)
+   [otel] Registered before_prompt_build hook (via api.on)
    [otel] Registered tool_result_persist hook (via api.on)
    [otel] Registered agent_end hook (via api.on)
    [otel] Registered command event hooks (via api.registerHook)
@@ -416,7 +423,7 @@ systemctl --user restart openclaw-gateway
 
 ### Traces exported but not connected
 
-The custom plugin requires messages to flow through the normal pipeline (`message_received` → `before_agent_start` → tools → `agent_end`). Heartbeats and some internal events skip `message_received`, so those turns produce a standalone `openclaw.agent.turn` span without a parent `openclaw.request`. This is expected.
+The custom plugin requires messages to flow through the normal pipeline (`message_received` → `before_model_resolve` → `before_prompt_build` → tools → `agent_end`). Heartbeats and some internal events skip `message_received`, so those turns produce a standalone `openclaw.agent.turn` span without a parent `openclaw.request`. This is expected.
 
 ---
 
