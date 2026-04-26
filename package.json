@@ -36,7 +36,8 @@
     "@opentelemetry/sdk-node": "^0.203.0",
     "@opentelemetry/sdk-trace-node": "^2.0.1",
     "@opentelemetry/semantic-conventions": "^1.30.0",
-    "@traceloop/node-server-sdk": "^0.22.6"
+    "@traceloop/node-server-sdk": "^0.22.6",
+    "import-in-the-middle": "^1.13.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

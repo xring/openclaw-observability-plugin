@@ -15,9 +15,18 @@ import { resolveCaptureContent } from './capture-content.mjs';
 
 // Step 1: Register IITM as an ESM module loader hook
 // This MUST happen before any instrumented modules are imported.
+// Exclude @mariozechner/pi-ai and pi-agent-core because IITM wrapping
+// breaks their named exports (SyntaxError on getEnvApiKey, etc.).
 const require = createRequire(import.meta.url);
 const iitmHookPath = require.resolve('import-in-the-middle/hook.mjs');
-register(pathToFileURL(iitmHookPath).href, { parentURL: import.meta.url });
+register(pathToFileURL(iitmHookPath).href, { parentURL: import.meta.url }, {
+  data: {
+    exclude: [
+      '@mariozechner/pi-ai',
+      '@mariozechner/pi-agent-core',
+    ],
+  },
+});
 
 // Step 2: Set up the OTel SDK with GenAI instrumentations
 const { NodeSDK } = await import("@opentelemetry/sdk-node");
