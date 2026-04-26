@@ -17,16 +17,12 @@ import { resolveCaptureContent } from './capture-content.mjs';
 // This MUST happen before any instrumented modules are imported.
 // Exclude @mariozechner/pi-ai and pi-agent-core because IITM wrapping
 // breaks their named exports (SyntaxError on getEnvApiKey, etc.).
+// Use IITM_EXCLUDE env var instead of data.exclude (Node.js 24 compat).
+process.env.IITM_EXCLUDE = '@mariozechner/pi-ai,@mariozechner/pi-agent-core';
+
 const require = createRequire(import.meta.url);
 const iitmHookPath = require.resolve('import-in-the-middle/hook.mjs');
-register(pathToFileURL(iitmHookPath).href, { parentURL: import.meta.url }, {
-  data: {
-    exclude: [
-      '@mariozechner/pi-ai',
-      '@mariozechner/pi-agent-core',
-    ],
-  },
-});
+register(pathToFileURL(iitmHookPath).href, import.meta.url);
 
 // Step 2: Set up the OTel SDK with GenAI instrumentations
 const { NodeSDK } = await import("@opentelemetry/sdk-node");
