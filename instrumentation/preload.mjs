@@ -13,24 +13,17 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { resolveCaptureContent } from './capture-content.mjs';
 
-// Step 1: Preload problematic modules BEFORE registering IITM.
-// If these modules are already in the ESM cache, IITM may skip re-wrapping them.
-try {
-  await import('@mariozechner/pi-ai');
-  await import('@mariozechner/pi-agent-core');
-  console.log('[otel-preload] Preloaded pi-ai and pi-agent-core before IITM registration');
-} catch (e) {
-  console.log('[otel-preload] Preload of pi-ai/pi-agent-core skipped (not yet resolvable):', e.message);
-}
+// NOTE: IITM registration is DISABLED because import-in-the-middle 1.15.0
+// breaks @mariozechner/pi-ai named exports on Node.js 24.
+// All LLM instrumentation is now done via OpenClaw typed hooks (llm_input / llm_output)
+// in src/hooks.ts, which capture prompts, responses, and token counts without IITM.
+//
+// If you re-enable this preload, you MUST ensure IITM excludes pi-ai packages
+// or downgrade to Node.js 22.
 
-// Step 2: Register IITM as an ESM module loader hook.
-// Exclude @mariozechner/pi-ai and pi-agent-core because IITM wrapping
-// breaks their named exports (SyntaxError on getEnvApiKey, etc.).
-process.env.IITM_EXCLUDE = '@mariozechner/pi-ai,@mariozechner/pi-agent-core';
-
-const require = createRequire(import.meta.url);
-const iitmHookPath = require.resolve('import-in-the-middle/hook.mjs');
-register(pathToFileURL(iitmHookPath).href, import.meta.url);
+// const require = createRequire(import.meta.url);
+// const iitmHookPath = require.resolve('import-in-the-middle/hook.mjs');
+// register(pathToFileURL(iitmHookPath).href, import.meta.url);
 
 // Step 2: Set up the OTel SDK with GenAI instrumentations
 const { NodeSDK } = await import("@opentelemetry/sdk-node");

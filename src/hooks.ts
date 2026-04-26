@@ -336,6 +336,19 @@ export function registerHooks(
           parentContext
         );
 
+        // Capture prompt content when enabled
+        if (config.captureContent) {
+          const prompt = event?.prompt;
+          if (typeof prompt === "string" && prompt.length > 0) {
+            llmSpan.setAttribute("gen_ai.prompt", prompt.slice(0, 4096));
+            llmSpan.setAttribute("openclaw.llm.prompt", prompt.slice(0, 4096));
+          }
+          const systemPrompt = event?.systemPrompt;
+          if (typeof systemPrompt === "string" && systemPrompt.length > 0) {
+            llmSpan.setAttribute("openclaw.llm.system_prompt", systemPrompt.slice(0, 2048));
+          }
+        }
+
         if (sessionCtx) {
           sessionCtx.llmSpan = llmSpan;
           sessionCtx.llmStartTime = Date.now();
@@ -398,6 +411,16 @@ export function registerHooks(
         }
         if (totalTokens > 0) {
           llmSpan.setAttribute("gen_ai.usage.total_tokens", totalTokens);
+        }
+
+        // Capture response content when enabled
+        if (config.captureContent) {
+          const assistantTexts = event?.assistantTexts;
+          if (Array.isArray(assistantTexts) && assistantTexts.length > 0) {
+            const response = assistantTexts.join("\n");
+            llmSpan.setAttribute("gen_ai.completion", response.slice(0, 4096));
+            llmSpan.setAttribute("openclaw.llm.response", response.slice(0, 4096));
+          }
         }
 
         const durationMs =
