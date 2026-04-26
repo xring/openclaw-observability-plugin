@@ -13,11 +13,19 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { resolveCaptureContent } from './capture-content.mjs';
 
-// Step 1: Register IITM as an ESM module loader hook
-// This MUST happen before any instrumented modules are imported.
+// Step 1: Preload problematic modules BEFORE registering IITM.
+// If these modules are already in the ESM cache, IITM may skip re-wrapping them.
+try {
+  await import('@mariozechner/pi-ai');
+  await import('@mariozechner/pi-agent-core');
+  console.log('[otel-preload] Preloaded pi-ai and pi-agent-core before IITM registration');
+} catch (e) {
+  console.log('[otel-preload] Preload of pi-ai/pi-agent-core skipped (not yet resolvable):', e.message);
+}
+
+// Step 2: Register IITM as an ESM module loader hook.
 // Exclude @mariozechner/pi-ai and pi-agent-core because IITM wrapping
 // breaks their named exports (SyntaxError on getEnvApiKey, etc.).
-// Use IITM_EXCLUDE env var instead of data.exclude (Node.js 24 compat).
 process.env.IITM_EXCLUDE = '@mariozechner/pi-ai,@mariozechner/pi-agent-core';
 
 const require = createRequire(import.meta.url);
