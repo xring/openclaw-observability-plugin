@@ -69,9 +69,16 @@ interface SessionTraceContext {
   rootContext: Context;
   agentSpan?: Span;
   agentContext?: Context;
-  /** Current in-flight LLM call span, set on `llm_input`, closed on `llm_output`. */
+  /**
+   * In-flight LLM call spans keyed by runId.
+   * Supports concurrent / multi-turn calls within the same session.
+   */
+  llmSpans: Map<string, { span: Span; startTime: number }>;
+  /**
+   * Legacy single-slot for providers that don't supply a stable runId.
+   * llm_output falls back to this when no runId match is found.
+   */
   llmSpan?: Span;
-  /** When the in-flight LLM call started (monotonic ms), for duration fallback. */
   llmStartTime?: number;
   startTime: number;
 }
@@ -155,6 +162,7 @@ export function registerHooks(
         sessionContextMap.set(sessionKey, {
           rootSpan,
           rootContext,
+          llmSpans: new Map(),
           startTime: Date.now(),
         });
 
@@ -234,6 +242,7 @@ export function registerHooks(
             rootContext: agentContext,
             agentSpan,
             agentContext,
+            llmSpans: new Map(),
             startTime: Date.now(),
           });
         }
@@ -350,8 +359,14 @@ export function registerHooks(
         }
 
         if (sessionCtx) {
-          sessionCtx.llmSpan = llmSpan;
-          sessionCtx.llmStartTime = Date.now();
+          const runId = event?.runId;
+          if (runId) {
+            sessionCtx.llmSpans.set(runId, { span: llmSpan, startTime: Date.now() });
+          } else {
+            // Fallback: no runId, use legacy single slot
+            sessionCtx.llmSpan = llmSpan;
+            sessionCtx.llmStartTime = Date.now();
+          }
         } else {
           // No session context at all — end the span right away to avoid
           // leaking an in-flight span with no closer.
@@ -381,7 +396,23 @@ export function registerHooks(
       try {
         const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
         const sessionCtx = sessionContextMap.get(sessionKey);
-        const llmSpan = sessionCtx?.llmSpan;
+        if (!sessionCtx) return undefined;
+
+        // Prefer runId-keyed span; fall back to legacy single slot
+        const runId = event?.runId;
+        let llmSpan: Span | undefined;
+        let llmStartTime: number | undefined;
+        if (runId && sessionCtx.llmSpans.has(runId)) {
+          const entry = sessionCtx.llmSpans.get(runId)!;
+          llmSpan = entry.span;
+          llmStartTime = entry.startTime;
+          sessionCtx.llmSpans.delete(runId);
+        } else {
+          llmSpan = sessionCtx.llmSpan;
+          llmStartTime = sessionCtx.llmStartTime;
+          sessionCtx.llmSpan = undefined;
+          sessionCtx.llmStartTime = undefined;
+        }
         if (!llmSpan) return undefined;
 
         const responseModel =
@@ -426,8 +457,8 @@ export function registerHooks(
         const durationMs =
           typeof event?.durationMs === "number"
             ? event.durationMs
-            : sessionCtx?.llmStartTime
-              ? Date.now() - sessionCtx.llmStartTime
+            : llmStartTime
+              ? Date.now() - llmStartTime
               : undefined;
         if (typeof durationMs === "number") {
           llmSpan.setAttribute("openclaw.llm.duration_ms", durationMs);
@@ -444,8 +475,6 @@ export function registerHooks(
         }
 
         llmSpan.end();
-        sessionCtx!.llmSpan = undefined;
-        sessionCtx!.llmStartTime = undefined;
       } catch {
         // Never let telemetry errors break the main flow
       }
@@ -699,40 +728,47 @@ export function registerHooks(
 
         const sessionCtx = sessionContextMap.get(sessionKey);
 
-        // Safety net: close any leftover in-flight LLM span so it
-        // doesn't leak past the agent turn.
+        // Safety net: close any leftover in-flight LLM spans so they
+        // don't leak past the agent turn.
         // Some providers (e.g., ZAI/GLM) don't emit llm_output events,
         // so we populate the span with token data from agent_end diagnostics
         // and close it with OK status instead of ERROR.
+        const allLeftoverSpans: Array<{ span: Span; startTime?: number }> = [];
+        if (sessionCtx?.llmSpans?.size) {
+          for (const entry of sessionCtx.llmSpans.values()) {
+            allLeftoverSpans.push(entry);
+          }
+          sessionCtx.llmSpans.clear();
+        }
         if (sessionCtx?.llmSpan) {
+          allLeftoverSpans.push({ span: sessionCtx.llmSpan, startTime: sessionCtx.llmStartTime });
+          sessionCtx.llmSpan = undefined;
+          sessionCtx.llmStartTime = undefined;
+        }
+        for (const { span: leftoverSpan, startTime: leftoverStart } of allLeftoverSpans) {
           try {
-            // Populate token data from agent_end diagnostics if available
             if (totalInputTokens > 0) {
-              sessionCtx.llmSpan.setAttribute("gen_ai.usage.input_tokens", totalInputTokens);
+              leftoverSpan.setAttribute("gen_ai.usage.input_tokens", totalInputTokens);
             }
             if (totalOutputTokens > 0) {
-              sessionCtx.llmSpan.setAttribute("gen_ai.usage.output_tokens", totalOutputTokens);
+              leftoverSpan.setAttribute("gen_ai.usage.output_tokens", totalOutputTokens);
             }
             if (cacheReadTokens > 0) {
-              sessionCtx.llmSpan.setAttribute("gen_ai.usage.cache_read_tokens", cacheReadTokens);
+              leftoverSpan.setAttribute("gen_ai.usage.cache_read_tokens", cacheReadTokens);
             }
             if (cacheWriteTokens > 0) {
-              sessionCtx.llmSpan.setAttribute("gen_ai.usage.cache_write_tokens", cacheWriteTokens);
+              leftoverSpan.setAttribute("gen_ai.usage.cache_write_tokens", cacheWriteTokens);
             }
-            const llmDurationMs = sessionCtx.llmStartTime
-              ? Date.now() - sessionCtx.llmStartTime
-              : undefined;
+            const llmDurationMs = leftoverStart ? Date.now() - leftoverStart : undefined;
             if (typeof llmDurationMs === "number") {
-              sessionCtx.llmSpan.setAttribute("openclaw.llm.duration_ms", llmDurationMs);
+              leftoverSpan.setAttribute("openclaw.llm.duration_ms", llmDurationMs);
             }
-            sessionCtx.llmSpan.setStatus({
+            leftoverSpan.setStatus({
               code: SpanStatusCode.OK,
               message: "closed by agent_end (provider did not emit llm_output)",
             });
-            sessionCtx.llmSpan.end();
+            leftoverSpan.end();
           } catch { /* ignore */ }
-          sessionCtx.llmSpan = undefined;
-          sessionCtx.llmStartTime = undefined;
         }
 
         // End the agent turn span
